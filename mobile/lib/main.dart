@@ -91,7 +91,7 @@ class PgConversation {
   // receives neither nicknames nor read counters.
   String get title => nickname ?? 'Private chat $number';
   String get initials {
-    final pieces = title.trim().split(RegExp(r'\\s+'));
+    final pieces = title.trim().split(RegExp(r'\s+'));
     if (pieces.length > 1) {
       return ('${pieces[0][0]}${pieces[1][0]}').toUpperCase();
     }
@@ -588,6 +588,49 @@ class _PgHomeState extends State<PgHome> {
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeOut);
     });
+  }
+
+  Future<void> _renameChat(PgConversation chat) async {
+    if (chat.cleared || chat.page == 'ended') return;
+    final controller = TextEditingController(text: chat.nickname ?? '');
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('Name this conversation',
+          style: TextStyle(color: _white, fontWeight: FontWeight.w800)),
+        content: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+          TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 24,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              hintText: 'e.g. Suitor or KwameP',
+              prefixIcon: Icon(Icons.edit_outlined, color: _orange),
+            ),
+            onSubmitted: (value) => Navigator.pop(ctx, value),
+          ),
+          const SizedBox(height: 8),
+          const Text('This label is visible only on your phone and disappears when the session ends.',
+            style: TextStyle(color: _muted, fontSize: 12, height: 1.4)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('Save name'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!mounted || chosen == null || chat.cleared ||
+        !_chats.contains(chat)) return;
+    setState(() => chat.rename(chosen));
   }
 
   void _showSafetyCode() {
