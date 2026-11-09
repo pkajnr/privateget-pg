@@ -778,49 +778,63 @@ class _PgHomeState extends State<PgHome> {
     ]),
   );
 
+
   @override
   Widget build(BuildContext context) {
     final online = _token != null;
-    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
-    final composing = online && _page == 'chat' && keyboardOpen;
+    // Keep the same widget positions when the keyboard opens. Moving the
+    // TextField to another element slot used to make Android lose focus.
+    final typing = online && _page == 'chat' &&
+        MediaQuery.viewInsetsOf(context).bottom > 0;
+    final connected = online && _page == 'chat';
     return Scaffold(
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        toolbarHeight: composing ? 56 : 75,
-        titleSpacing: 20,
+        toolbarHeight: 66,
+        titleSpacing: _selectedChat == null ? 18 : 0,
+        leading: _selectedChat == null ? null : IconButton(
+          tooltip: 'All conversations',
+          onPressed: _returnHome,
+          icon: const Icon(Icons.arrow_back_rounded, color: _white),
+        ),
         title: Row(children: [
           Container(
-            width: 40, height: 40,
+            width: 34, height: 34,
             decoration: BoxDecoration(
               color: _orange.withValues(alpha: 0.13),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _orange.withValues(alpha: 0.32)),
+              borderRadius: BorderRadius.circular(11),
             ),
-            child: const Icon(Icons.shield_outlined, color: _orange, size: 24),
+            child: const Icon(Icons.shield_outlined, color: _orange, size: 21),
           ),
-          const SizedBox(width: 11),
-          const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('PrivateGet', style: TextStyle(
-              color: _white, fontWeight: FontWeight.w800, fontSize: 20,
-              letterSpacing: -0.4)),
-            Text('PRIVATE MESSAGING', style: TextStyle(
-              color: _muted, fontSize: 9, letterSpacing: 1.3,
-              fontWeight: FontWeight.w800)),
-          ]),
+          const SizedBox(width: 9),
+          const Flexible(child: Text('PrivateGet',
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: _white,
+              fontWeight: FontWeight.w800, fontSize: 19))),
+          const SizedBox(width: 9),
+          Container(width: 8, height: 8, decoration: BoxDecoration(
+            color: connected ? _teal : (online ? _orange : _muted),
+            shape: BoxShape.circle,
+          )),
         ]),
         actions: [
-          if (online && _page == 'chat')
+          if (online && _page == 'chat') ...[
+            IconButton(
+              tooltip: 'Verify safety code',
+              onPressed: _showSafetyCode,
+              icon: const Icon(Icons.verified_user_outlined, color: _muted),
+            ),
             IconButton(
               tooltip: 'End conversation',
               onPressed: _confirmEnd,
               icon: const Icon(Icons.logout_rounded, color: _danger),
             ),
-          IconButton(
-            tooltip: 'Privacy and build information',
-            onPressed: _showPrivacyNote,
-            icon: const Icon(Icons.info_outline_rounded, color: _muted),
-          ),
-          const SizedBox(width: 10),
+          ] else
+            IconButton(
+              tooltip: 'Privacy and build information',
+              onPressed: _showPrivacyNote,
+              icon: const Icon(Icons.info_outline_rounded, color: _muted),
+            ),
         ],
       ),
       body: Container(
@@ -829,27 +843,37 @@ class _PgHomeState extends State<PgHome> {
           colors: [_bg, Color(0xFF101D2E)],
         )),
         child: SafeArea(child: Column(children: [
-          if (!composing) Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 9),
-            color: const Color(0xFF352C20),
-            child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.warning_amber_rounded, color: _orange, size: 16),
-              SizedBox(width: 8),
-              Flexible(child: Text('EARLY ACCESS · NOT SECURITY AUDITED',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 10, color: Color(0xFFFFD99E),
-                  fontWeight: FontWeight.w800, letterSpacing: 0.7))),
-            ]),
+          Visibility(
+            visible: !typing,
+            maintainState: true,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 9),
+              color: const Color(0xFF352C20),
+              child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.warning_amber_rounded, color: _orange, size: 16),
+                SizedBox(width: 8),
+                Flexible(child: Text('EARLY ACCESS · NOT SECURITY AUDITED',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 10, color: Color(0xFFFFD99E),
+                    fontWeight: FontWeight.w800, letterSpacing: 0.7))),
+              ]),
+            ),
           ),
-          if (_error != null) _errorBanner(),
+          Visibility(
+            visible: _error != null,
+            maintainState: true,
+            child: _error != null ? _errorBanner() : const SizedBox.shrink(),
+          ),
           Expanded(child: Padding(
-            padding: composing
-              ? const EdgeInsets.fromLTRB(12, 6, 12, 6)
-              : const EdgeInsets.fromLTRB(19, 23, 19, 8),
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
             child: _renderBody(online),
           )),
-          if (!composing) _connectionFooter(online),
+          Visibility(
+            visible: !typing,
+            maintainState: true,
+            child: _connectionFooter(online),
+          ),
         ])),
       ),
     );
@@ -882,6 +906,45 @@ class _PgHomeState extends State<PgHome> {
         _heading('A private space for your conversations.',
           'Start a temporary conversation with someone you trust, or join using their one-time invite.'),
         const SizedBox(height: 24),
+        if (_chats.isNotEmpty) ...[
+          _sectionLabel('YOUR CONVERSATIONS'),
+          const SizedBox(height: 12),
+          ..._chats.reversed.map((chat) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: () => _openChat(chat),
+              child: _card(Row(children: [
+                _iconTile(chat.page == 'chat'
+                    ? Icons.chat_bubble_outline_rounded
+                    : chat.page == 'ended'
+                        ? Icons.lock_clock_outlined
+                        : Icons.schedule_rounded,
+                    color: chat.page == 'chat' ? _teal : _orange),
+                const SizedBox(width: 12),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(chat.title, style: const TextStyle(
+                      color: _white, fontWeight: FontWeight.w800,
+                      fontSize: 15)),
+                    const SizedBox(height: 4),
+                    Text(chat.status, style: const TextStyle(
+                      color: _muted, fontSize: 12)),
+                  ],
+                )),
+                Container(width: 7, height: 7, decoration: BoxDecoration(
+                  color: chat.page == 'chat' ? _teal
+                      : chat.page == 'ended' ? _muted : _orange,
+                  shape: BoxShape.circle,
+                )),
+                const SizedBox(width: 10),
+                const Icon(Icons.chevron_right_rounded, color: _muted),
+              ]), padding: const EdgeInsets.all(13)),
+            ),
+          )),
+          const SizedBox(height: 12),
+        ],
         _card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             _iconTile(Icons.add_comment_outlined),
@@ -960,14 +1023,15 @@ class _PgHomeState extends State<PgHome> {
                 fontWeight: FontWeight.w800, letterSpacing: 0.7)),
           ),
           const SizedBox(height: 16),
-          _primaryAction('Copy invitation code', () {
+          _primaryAction(_inviteCode == null
+              ? 'Creating invitation…' : 'Copy invitation code', () {
             final code = _inviteCode;
             if (code == null) return;
             Clipboard.setData(ClipboardData(text: code));
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
               content: Text('Invite copied. Share it privately and clear your clipboard afterward.'),
             ));
-          }, icon: Icons.copy_rounded),
+          }, disabled: _inviteCode == null, icon: Icons.copy_rounded),
           const SizedBox(height: 15),
           const Text('Expires after 10 minutes • Can only be used once',
             textAlign: TextAlign.center,
@@ -1031,32 +1095,9 @@ class _PgHomeState extends State<PgHome> {
       ],
     ));
 
-    if (_page == 'chat') {
-    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
-    return Column(children: [
-      if (!keyboardOpen) ...[
-      _card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          _iconTile(Icons.person_outline_rounded, color: _teal),
-          const SizedBox(width: 12),
-          const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Private contact', style: TextStyle(
-              color: _white, fontSize: 16, fontWeight: FontWeight.w800)),
-            SizedBox(height: 4),
-            Text('Temporary conversation', style: TextStyle(
-              color: _muted, fontSize: 12)),
-          ])),
-          _statusChip('CONNECTED', icon: Icons.circle, color: _teal),
-        ]),
-        const SizedBox(height: 14),
-        Text('Safety code  ${_safetyCode ?? "Unavailable"}',
-          style: const TextStyle(color: _muted, fontSize: 12)),
-        const SizedBox(height: 4),
-        const Text('Compare on both devices to detect unexpected key changes.',
-          style: TextStyle(color: Color(0xFFF0BE80), fontSize: 10)),
-      ]), padding: const EdgeInsets.all(16)),
-      const SizedBox(height: 16),
-      ],
+    if (_page == 'chat') return Column(children: [
+      // No large contact card: status is the dot beside PrivateGet.
+      // Safety verification remains available in the top toolbar.
       Expanded(child: _messages.isEmpty
         ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.chat_bubble_outline_rounded,
@@ -1071,7 +1112,6 @@ class _PgHomeState extends State<PgHome> {
           ]))
         : ListView.builder(
             controller: _scroll,
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: const EdgeInsets.only(bottom: 14),
             itemCount: _messages.length,
             itemBuilder: (context, index) {
@@ -1110,12 +1150,6 @@ class _PgHomeState extends State<PgHome> {
         Expanded(child: TextField(
           controller: _messageInput,
           minLines: 1, maxLines: 2, maxLength: 2000,
-          onTap: () {
-            _scrollDown();
-            Future<void>.delayed(const Duration(milliseconds: 300), () {
-              if (mounted) _scrollDown();
-            });
-          },
           keyboardType: TextInputType.multiline,
           textInputAction: TextInputAction.newline,
           textCapitalization: TextCapitalization.sentences,
@@ -1135,13 +1169,10 @@ class _PgHomeState extends State<PgHome> {
           icon: const Icon(Icons.send_rounded, size: 22),
         )),
       ]),
-      if (!keyboardOpen) ...[
-        const SizedBox(height: 12),
-        _secondaryAction('End conversation', _confirmEnd,
-          icon: Icons.logout_rounded, danger: true),
-      ],
+
+      // The composer remains the last child, fixed immediately above
+      // the Android keyboard. Navigation/end controls live in the toolbar.
     ]);
-    }
 
     if (_page == 'ended') return Center(child: SingleChildScrollView(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
