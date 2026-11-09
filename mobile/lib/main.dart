@@ -91,6 +91,7 @@ class PgConversation {
   // receives neither nicknames nor read counters.
   String get title => nickname ?? 'Private chat $number';
   String get initials {
+    if (nickname == null) return number.toString().padLeft(2, '0');
     final pieces = title.trim().split(RegExp(r'\s+'));
     if (pieces.length > 1) {
       return ('${pieces[0][0]}${pieces[1][0]}').toUpperCase();
