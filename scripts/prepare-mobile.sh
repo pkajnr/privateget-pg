@@ -70,6 +70,41 @@ void main() {
     expect(second.messages.single.text, 'Message for second chat');
     second.clearSensitive();
   });
+
+  test('Chat labels stay local, allow user names and clear on end', () {
+    final suitor = PgConversation(1)..rename('  Suitor  ');
+    final kwame = PgConversation(2)..rename('KwameP');
+    expect(suitor.title, 'Suitor');
+    expect(suitor.initials, 'SU');
+    expect(kwame.title, 'KwameP');
+    expect(kwame.initials, 'KW');
+    suitor.rename('Kwame P');
+    expect(suitor.initials, 'KP');
+    suitor.clearSensitive();
+    expect(suitor.nickname, isNull);
+    expect(suitor.unreadCount, 0);
+    kwame.clearSensitive();
+  });
+
+  test('Unread counters are separate per session and reset on view', () {
+    final suitor = PgConversation(1)..page = 'chat';
+    final kwame = PgConversation(2)..page = 'chat';
+    suitor.receive([
+      PgMessage('first', false), PgMessage('second', false),
+    ], visible: false);
+    kwame.receive([PgMessage('hello', false)], visible: false);
+    expect(suitor.unreadCount, 2);
+    expect(kwame.unreadCount, 1);
+    suitor.markRead();
+    expect(suitor.unreadCount, 0);
+    expect(kwame.unreadCount, 1);
+    suitor.receive([PgMessage('read while open', false)], visible: true);
+    expect(suitor.unreadCount, 0);
+    expect(suitor.messages.length, 3);
+    suitor.clearSensitive();
+    kwame.clearSensitive();
+    expect(kwame.messages, isEmpty);
+  });
 }
 PG_TEST
 
