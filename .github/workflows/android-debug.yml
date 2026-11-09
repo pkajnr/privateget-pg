@@ -1,0 +1,31 @@
+name: Build PG Android alpha APK
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Server HTTPS URL, e.g. https://pg.example.com (or local LAN HTTP for a lab only)'
+        required: true
+        type: string
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Create native project
+        run: bash scripts/prepare-mobile.sh
+      - name: Build debug Android APK
+        working-directory: mobile
+        env:
+          PG_API_URL: ${{ inputs.api_url }}
+        run: flutter build apk --debug --dart-define="PG_API_URL=$PG_API_URL"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: privateget-pg-alpha-android-apk
+          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 7
