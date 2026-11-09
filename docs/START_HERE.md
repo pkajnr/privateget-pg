@@ -58,3 +58,28 @@ The workflow is source-only and was not executed in the authoring environment. I
 - No server-side capability to read ciphertext *by design*, but active server key substitution is currently possible; safety-code comparison is essential.
 
 Read `docs/SECURITY.md` before conducting any trials. **Never use this alpha for sensitive conversations.**
+
+
+## GitHub Actions `flutter analyze` failure — 9 November 2026
+
+The GitHub Actions log showed **17 analyzer errors**, all in `mobile/test/widget_test.dart`.
+The prior package did not contain a `test/` directory or `flutter_test` dependency,
+so `flutter create` generated its default counter-app test referencing `MyApp`.
+PrivateGet's actual root widget is named `PgApp`.
+
+Version 0.3 includes:
+- `mobile/test/widget_test.dart` with small PG-specific unit tests;
+- `flutter_test` as an SDK development dependency;
+- a `flutter test` verification step before the Android APK build.
+
+**If you already uploaded v0.2 to GitHub**, replace these files from v0.3:
+`mobile/pubspec.yaml`, `mobile/test/widget_test.dart`, and
+`.github/workflows/android-debug.yml`. Then commit and rerun
+**Actions → Build PG Android alpha APK → Run workflow**.
+
+Another quick workaround is to delete the generated test after `flutter create`,
+but that removes test coverage and is not the recommended permanent fix.
+
+The APK build itself has not been executed in this environment because the
+Flutter and Android SDK toolchains are not installed here. The next workflow run
+may reveal additional Gradle/Android compilation issues; send the next log if so.

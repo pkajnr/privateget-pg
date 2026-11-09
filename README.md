@@ -1,3 +1,13 @@
+# PrivateGet PG — Real Networked Alpha (UI v0.5)
+
+**NEW:** Original AWS-console-inspired dark navy + warm orange user interface; no user-facing Party A/B labels. The existing invitation and relay APIs are unchanged.
+
+**SECURITY NOTICE:** This is a visual upgrade to an **experimental alpha**. It has not been security audited and must **not** be used for confidential communication.
+
+See `docs/UI_RELEASE_NOTES_v0.5.md` for exact changes and GitHub build steps.
+
+---
+
 # PrivateGet (PG) — actual networked mobile app ALPHA
 
 **Version 0.3 (GitHub Actions analyzer fix):** A PG-specific Flutter test and `flutter_test` dependency replace the generated counter app test. The mobile build has not yet been verified.\n\n**Status as of 9 November 2026:** Real server source, real Flutter mobile source, tested two-client networked encryption-relay flow. See [start instructions](docs/START_HERE.md). **Not yet a compiled APK, publicly hosted service, or production-secure messenger.**
@@ -90,3 +100,7 @@ docs/SECURITY.md         threat model, limits and production blockers
 The code demonstrates **two actual communicating clients**, not a finished secure product. It MUST NOT be deployed for confidential, critical or production traffic. For production, adopt an externally vetted E2EE protocol/implementation, HTTPS/WSS, authenticated key binding, device trust and replay handling, platform secure storage/backup exclusions, signed builds, abuse protections, and independent mobile/server reviews.
 
 PG source code is yours to maintain and deploy, subject to the dependency licenses. No proprietary vendor platform is required for this alpha.
+
+## v0.4: stale generated Flutter test fix
+
+If GitHub Actions still shows 17 errors mentioning `MyApp` and `flutter_test`, replace **only** `scripts/prepare-mobile.sh` with the v0.4 version, commit to the same branch used by Actions and rerun the workflow. The script rewrites `mobile/test/widget_test.dart`, adds `flutter_test` to `pubspec.yaml` when necessary, runs Flutter tests, and runs `flutter analyze` before the APK step. The fix is repeatable even when `flutter create` generates default test files. This alpha is for lab use only, not confidential conversations.

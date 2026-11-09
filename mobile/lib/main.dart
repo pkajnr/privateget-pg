@@ -12,9 +12,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 const _apiBase = String.fromEnvironment('PG_API_URL', defaultValue: 'http://10.0.2.2:8787');
-const _panel = Color(0xFF101E35);
-const _surface = Color(0xFF172842);
-const _green = Color(0xFF40E0A0);
+const _bg = Color(0xFF0B1523);
+const _surface = Color(0xFF17283B);
+const _field = Color(0xFF0E2032);
+const _stroke = Color(0xFF324457);
+const _orange = Color(0xFFFFA51F);
+const _teal = Color(0xFF54D7B2);
+const _danger = Color(0xFFFF8990);
+const _muted = Color(0xFFAFBDCB);
+const _white = Color(0xFFF3F7FC);
 
 void main() => runApp(const PgApp());
 
@@ -25,19 +31,34 @@ class PgApp extends StatelessWidget {
     title: 'PrivateGet · PG',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
+      useMaterial3: true,
       brightness: Brightness.dark,
-      scaffoldBackgroundColor: _panel,
-      colorScheme: ColorScheme.fromSeed(seedColor: _green, brightness: Brightness.dark),
+      scaffoldBackgroundColor: _bg,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: _orange, brightness: Brightness.dark, surface: _surface),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: _surface,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(13), borderSide: BorderSide.none),
+        fillColor: _field,
+        hintStyle: const TextStyle(color: _muted, fontSize: 13),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: _stroke),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: _stroke),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: _orange, width: 1.5),
+        ),
       ),
-      elevatedButtonTheme: ElevatedButtonThemeData(style: ElevatedButton.styleFrom(
-        backgroundColor: _green, foregroundColor: _panel, minimumSize: const Size.fromHeight(52),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      )),
-      appBarTheme: const AppBarTheme(backgroundColor: _panel),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: _bg, surfaceTintColor: Colors.transparent),
+      snackBarTheme: const SnackBarThemeData(
+        backgroundColor: _surface,
+        contentTextStyle: TextStyle(color: _white),
+      ),
     ),
     home: const PgHome(),
   );
@@ -333,144 +354,577 @@ class _PgHomeState extends State<PgHome> {
       duration: const Duration(milliseconds: 160), curve: Curves.easeOut);
   }); }
 
-  Widget _heading(String heading, String sub) => Padding(
-    padding: const EdgeInsets.only(bottom: 22),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(heading, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 28)),
-      const SizedBox(height: 7), Text(sub, style: const TextStyle(color: Colors.white70, height: 1.4)),
+  // PG Interface v0.5 — AWS-inspired navy, warm orange, and clear action hierarchy.
+  // The security warning remains prominent: styling does not imply a security audit.
+  Widget _sectionLabel(String value) => Text(
+    value.toUpperCase(),
+    style: const TextStyle(
+      color: _muted, fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1.45,
+    ),
+  );
+
+  Widget _heading(String title, String description, {String? eyebrow}) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (eyebrow != null) ...[
+        _sectionLabel(eyebrow),
+        const SizedBox(height: 10),
+      ],
+      Text(title, style: const TextStyle(
+        color: _white, fontWeight: FontWeight.w800, fontSize: 30,
+        height: 1.12, letterSpacing: -0.75,
+      )),
+      const SizedBox(height: 11),
+      Text(description, style: const TextStyle(
+        color: _muted, height: 1.48, fontSize: 14,
+      )),
+    ],
+  );
+
+  Widget _card(Widget child, {EdgeInsetsGeometry? padding}) => Container(
+    width: double.infinity,
+    padding: padding ?? const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      color: _surface,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: _stroke),
+      boxShadow: [BoxShadow(
+        color: Colors.black.withValues(alpha: 0.12),
+        blurRadius: 18, offset: const Offset(0, 8),
+      )],
+    ),
+    child: child,
+  );
+
+  Widget _iconTile(IconData icon, {Color color = _orange}) => Container(
+    width: 45, height: 45,
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(13),
+      border: Border.all(color: color.withValues(alpha: 0.22)),
+    ),
+    child: Icon(icon, color: color, size: 23),
+  );
+
+  Widget _primaryAction(String title, VoidCallback onTap, {
+    bool disabled = false,
+    IconData icon = Icons.arrow_forward_rounded,
+  }) => SizedBox(
+    width: double.infinity, height: 52,
+    child: ElevatedButton(
+      onPressed: disabled ? null : onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: _orange,
+        foregroundColor: _bg,
+        disabledBackgroundColor: _orange.withValues(alpha: 0.35),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 0,
+      ),
+      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Flexible(child: Text(title, overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+        const SizedBox(width: 10), Icon(icon, size: 19),
+      ]),
+    ),
+  );
+
+  Widget _secondaryAction(String title, VoidCallback onTap, {
+    IconData icon = Icons.arrow_back_rounded,
+    bool danger = false,
+  }) => SizedBox(
+    width: double.infinity, height: 48,
+    child: OutlinedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18),
+      label: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: danger ? _danger : _white,
+        side: BorderSide(color: danger ? _danger.withValues(alpha: 0.6) : _stroke),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    ),
+  );
+
+  Widget _statusChip(String label, {
+    IconData icon = Icons.circle,
+    Color color = _teal,
+  }) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.1),
+      border: Border.all(color: color.withValues(alpha: 0.25)),
+      borderRadius: BorderRadius.circular(99),
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 13, color: color),
+      const SizedBox(width: 6),
+      Flexible(child: Text(label, overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color))),
     ]),
   );
-  Widget _button(String text, VoidCallback onTap, {bool disabled = false}) => ElevatedButton(
-    onPressed: disabled ? null : onTap,
-    child: Text(text, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+
+  Widget _featurePill(IconData icon, String title) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: 15, color: _teal),
+      const SizedBox(width: 7),
+      Text(title, style: const TextStyle(color: _muted, fontSize: 12)),
+    ],
   );
-  Widget _card(Widget child) => Container(width: double.infinity,
-    padding: const EdgeInsets.all(20), decoration: BoxDecoration(
-      color: _surface, borderRadius: BorderRadius.circular(17),
-      border: Border.all(color: Colors.white12)), child: child);
+
+  Future<void> _confirmEnd() async {
+    if (_ending || _busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: _surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('End this conversation?',
+          style: TextStyle(color: _white, fontWeight: FontWeight.w800)),
+        content: const Text(
+          'The app will discard this device’s session keys and chat messages. '
+          'The other device will be notified when reachable.',
+          style: TextStyle(color: _muted, height: 1.45),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep chatting')),
+          TextButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('End chat', style: TextStyle(color: _danger))),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) await _endChat();
+  }
+
+  void _showPrivacyNote() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 30),
+          child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _iconTile(Icons.security_rounded),
+              const SizedBox(height: 18),
+              const Text('About this PG build', style: TextStyle(
+                color: _white, fontSize: 23, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 10),
+              const Text(
+                'PrivateGet is currently an experimental alpha. '
+                'The message encryption protocol has not been independently audited. '
+                'Do not send secrets or sensitive personal information. '
+                'Avoid sharing invitation codes publicly.',
+                style: TextStyle(color: _muted, height: 1.6),
+              ),
+              const SizedBox(height: 22),
+              _secondaryAction('Close', () => Navigator.pop(sheetContext),
+                icon: Icons.close_rounded),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _errorBanner() => Container(
+    margin: const EdgeInsets.fromLTRB(18, 8, 18, 0),
+    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+    decoration: BoxDecoration(
+      color: const Color(0xFF3D2732),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: _danger.withValues(alpha: 0.3)),
+    ),
+    child: Row(children: [
+      const Icon(Icons.error_outline_rounded, color: _danger, size: 20),
+      const SizedBox(width: 10),
+      Expanded(child: Text(_error!, maxLines: 3, overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: Color(0xFFFFCFD2), fontSize: 12, height: 1.4))),
+      IconButton(
+        tooltip: 'Dismiss error', onPressed: () => setState(() => _error = null),
+        icon: const Icon(Icons.close, color: _muted, size: 17),
+      ),
+    ]),
+  );
+
+  Widget _connectionFooter(bool online) => Padding(
+    padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Icon(Icons.circle, size: 7, color: online ? _teal : _orange),
+      const SizedBox(width: 7),
+      Flexible(child: Text(
+        online ? 'Connected to PG relay • Device ${_deviceId!.substring(0, 8)}'
+          : 'Connecting to your PG relay',
+        textAlign: TextAlign.center,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: _muted, fontSize: 10),
+      )),
+    ]),
+  );
 
   @override
   Widget build(BuildContext context) {
     final online = _token != null;
     return Scaffold(
-      appBar: AppBar(title: const Row(children: [
-        Icon(Icons.shield_outlined, color: _green), SizedBox(width: 9),
-        Text('PrivateGet', style: TextStyle(fontWeight: FontWeight.bold)),
-        SizedBox(width: 6), Text('PG', style: TextStyle(color: _green, fontSize: 13)),
-      ])),
-      body: SafeArea(child: Column(children: [
-        Container(width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 10),
-          color: const Color(0xFF44310C),
-          child: const Text('EXPERIMENTAL ALPHA · NOT SECURITY-AUDITED · DO NOT SEND SECRETS',
-            style: TextStyle(color: Color(0xFFFFE6A2), fontSize: 11, fontWeight: FontWeight.w700), textAlign: TextAlign.center)),
-        if (_error != null) Container(width: double.infinity,
-          padding: const EdgeInsets.all(12), color: const Color(0xFF61252D),
-          child: Text(_error!, style: const TextStyle(fontSize: 12))),
-        Expanded(child: Padding(padding: const EdgeInsets.all(19), child: _renderBody(online))),
-        Padding(padding: const EdgeInsets.all(12), child: Text(
-          online ? 'Device: ${_deviceId!.substring(0,8)} • Server: $_apiBase' : 'Connecting to $_apiBase',
-          style: const TextStyle(color: Colors.white38, fontSize: 10), textAlign: TextAlign.center)),
-      ])),
+      appBar: AppBar(
+        toolbarHeight: 75,
+        titleSpacing: 20,
+        title: Row(children: [
+          Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(
+              color: _orange.withValues(alpha: 0.13),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _orange.withValues(alpha: 0.32)),
+            ),
+            child: const Icon(Icons.shield_outlined, color: _orange, size: 24),
+          ),
+          const SizedBox(width: 11),
+          const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('PrivateGet', style: TextStyle(
+              color: _white, fontWeight: FontWeight.w800, fontSize: 20,
+              letterSpacing: -0.4)),
+            Text('PRIVATE MESSAGING', style: TextStyle(
+              color: _muted, fontSize: 9, letterSpacing: 1.3,
+              fontWeight: FontWeight.w800)),
+          ]),
+        ]),
+        actions: [
+          IconButton(
+            tooltip: 'Privacy and build information',
+            onPressed: _showPrivacyNote,
+            icon: const Icon(Icons.info_outline_rounded, color: _muted),
+          ),
+          const SizedBox(width: 10),
+        ],
+      ),
+      body: Container(
+        decoration: const BoxDecoration(gradient: LinearGradient(
+          begin: Alignment.topCenter, end: Alignment.bottomCenter,
+          colors: [_bg, Color(0xFF101D2E)],
+        )),
+        child: SafeArea(child: Column(children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 9),
+            color: const Color(0xFF352C20),
+            child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(Icons.warning_amber_rounded, color: _orange, size: 16),
+              SizedBox(width: 8),
+              Flexible(child: Text('EARLY ACCESS · NOT SECURITY AUDITED',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 10, color: Color(0xFFFFD99E),
+                  fontWeight: FontWeight.w800, letterSpacing: 0.7))),
+            ]),
+          ),
+          if (_error != null) _errorBanner(),
+          Expanded(child: Padding(
+            padding: const EdgeInsets.fromLTRB(19, 23, 19, 8),
+            child: _renderBody(online),
+          )),
+          _connectionFooter(online),
+        ])),
+      ),
     );
   }
 
   Widget _renderBody(bool online) {
-    if (!online) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const CircularProgressIndicator(color: _green), const SizedBox(height: 20),
-      const Text('Connecting to real PG backend…'), const SizedBox(height: 15),
-      TextButton(onPressed: _register, child: const Text('Retry connection')),
-    ]));
-    if (_page == 'home') return SingleChildScrollView(child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _heading('Private by invitation.', 'Start a real chat between two phones through your PG server.'),
-        _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const Text('PARTY A', style: TextStyle(color: _green, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8), const Text('Invite someone to a temporary private session.'),
-          const SizedBox(height: 18), _button(_busy ? 'Creating…' : 'Create invitation', _createInvite, disabled: _busy),
-        ])),
+    if (!online) return Center(child: SingleChildScrollView(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        _iconTile(Icons.cloud_off_outlined, color: _orange),
         const SizedBox(height: 20),
-        _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const Text('PARTY B', style: TextStyle(color: _green, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8), const Text('Paste a one-time code received from Party A.'),
-          const SizedBox(height: 13), TextField(controller: _inviteInput,
-            autocorrect: false, enableSuggestions: false,
-            decoration: const InputDecoration(hintText: 'Paste invitation code')),
-          const SizedBox(height: 15), _button('Accept invitation', _acceptInvite, disabled: _busy),
-        ])),
-      ]));
-    if (_page == 'inviting') return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      _heading('Invite created', 'Share this one-time code privately. It expires after 10 minutes.'),
-      _card(Column(children: [
-        const Icon(Icons.link, color: _green, size: 36), const SizedBox(height: 15),
-        SelectableText(_inviteCode ?? '', textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1)),
-        const SizedBox(height: 18),
-        _button('Copy invitation code', () { Clipboard.setData(ClipboardData(text: _inviteCode!));
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied. Share privately, then clear clipboard.'))); }),
-      ])),
-      const SizedBox(height: 20), const Center(child: CircularProgressIndicator(color: _green)),
-      const SizedBox(height: 10), const Center(child: Text('Waiting for Party B to accept…')),
-      const Spacer(), OutlinedButton(onPressed: () => _stopToHome(), child: const Text('Cancel invitation')),
-    ]);
-    if (_page == 'waiting') return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      _heading(_role == 'A' ? 'Confirm Party B' : 'Waiting for approval',
-        _role == 'A' ? 'Someone accepted your invitation. Only approve your intended contact.'
-          : 'Party A must approve the connection before chatting.'),
-      _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Status: $_sessionState', style: const TextStyle(color: _green)),
+        const Text('Connecting to PrivateGet', style: TextStyle(
+          fontSize: 23, fontWeight: FontWeight.w800, color: _white)),
+        const SizedBox(height: 11),
+        const Text('The app needs a reachable PG server before you can invite contacts or chat.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: _muted, fontSize: 14, height: 1.5)),
+        const SizedBox(height: 22),
+        _primaryAction('Try connecting again', _register, icon: Icons.refresh_rounded),
         const SizedBox(height: 12),
-        if (_safetyCode != null) ...[
-          const Text('SAFETY CODE — compare on both phones'),
-          const SizedBox(height: 9), Text(_safetyCode!, textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 25, letterSpacing: 2)),
-          const SizedBox(height: 7),
-          const Text('If the two phones show different codes, do not chat.',
-            style: TextStyle(color: Colors.amberAccent, fontSize: 12)),
-        ],
-        if (_role == 'A' && _sessionState == 'awaiting_approval') ...[
-          const SizedBox(height: 18), _button(_busy ? 'Approving…' : 'Approve this connection', _approve, disabled: _busy),
-        ],
-      ])),
-      const Spacer(), OutlinedButton(onPressed: _endChat, child: const Text('Cancel / End session')),
-    ]);
+        Text(_apiBase, textAlign: TextAlign.center,
+          style: const TextStyle(color: _muted, fontSize: 11)),
+      ]),
+    ));
+
+    if (_page == 'home') return SingleChildScrollView(child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _statusChip('INVITATION-ONLY', icon: Icons.lock_outline_rounded, color: _orange),
+        const SizedBox(height: 20),
+        _heading('A private space for your conversations.',
+          'Start a temporary conversation with someone you trust, or join using their one-time invite.'),
+        const SizedBox(height: 24),
+        _card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            _iconTile(Icons.add_comment_outlined),
+            const SizedBox(width: 12),
+            const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Start a private chat', style: TextStyle(
+                color: _white, fontSize: 17, fontWeight: FontWeight.w800)),
+              SizedBox(height: 3),
+              Text('Create an invitation', style: TextStyle(color: _muted, fontSize: 12)),
+            ])),
+          ]),
+          const SizedBox(height: 17),
+          const Text('Generate a one-time code to share directly with your contact.',
+            style: TextStyle(color: _muted, fontSize: 13, height: 1.5)),
+          const SizedBox(height: 18),
+          _primaryAction(_busy ? 'Creating invite…' : 'Create invitation', _createInvite,
+            disabled: _busy, icon: Icons.arrow_forward_rounded),
+        ])),
+        const SizedBox(height: 15),
+        _card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            _iconTile(Icons.link_rounded, color: _teal),
+            const SizedBox(width: 12),
+            const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Join a conversation', style: TextStyle(
+                color: _white, fontSize: 17, fontWeight: FontWeight.w800)),
+              SizedBox(height: 3),
+              Text('Received an invite?', style: TextStyle(color: _muted, fontSize: 12)),
+            ])),
+          ]),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _inviteInput,
+            autocorrect: false,
+            enableSuggestions: false,
+            textCapitalization: TextCapitalization.none,
+            decoration: const InputDecoration(
+              hintText: 'Paste your invitation code',
+              prefixIcon: Icon(Icons.vpn_key_outlined, color: _muted),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _primaryAction(_busy ? 'Joining…' : 'Join private chat', _acceptInvite,
+            disabled: _busy, icon: Icons.arrow_forward_rounded),
+        ])),
+        const SizedBox(height: 22),
+        Wrap(spacing: 16, runSpacing: 12, children: [
+          _featurePill(Icons.shield_outlined, 'One-time invites'),
+          _featurePill(Icons.timer_outlined, 'Temporary sessions'),
+          _featurePill(Icons.visibility_off_outlined, 'No public directory'),
+        ]),
+        const SizedBox(height: 25),
+      ],
+    ));
+
+    if (_page == 'inviting') return SingleChildScrollView(child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _heading('Invitation ready',
+          'Send this code to the person you want to speak with.', eyebrow: 'NEW CONVERSATION'),
+        const SizedBox(height: 23),
+        _card(Column(children: [
+          _iconTile(Icons.link_rounded),
+          const SizedBox(height: 15),
+          _sectionLabel('YOUR SINGLE-USE INVITE'),
+          const SizedBox(height: 13),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 17, horizontal: 13),
+            decoration: BoxDecoration(
+              color: _field, borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _stroke),
+            ),
+            child: SelectableText(_inviteCode ?? '', textAlign: TextAlign.center,
+              style: const TextStyle(color: _white, fontSize: 15,
+                fontWeight: FontWeight.w800, letterSpacing: 0.7)),
+          ),
+          const SizedBox(height: 16),
+          _primaryAction('Copy invitation code', () {
+            final code = _inviteCode;
+            if (code == null) return;
+            Clipboard.setData(ClipboardData(text: code));
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Invite copied. Share it privately and clear your clipboard afterward.'),
+            ));
+          }, icon: Icons.copy_rounded),
+          const SizedBox(height: 15),
+          const Text('Expires after 10 minutes • Can only be used once',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: _muted, fontSize: 11)),
+        ])),
+        const SizedBox(height: 25),
+        Row(children: [
+          const SizedBox(width: 18, height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, color: _orange)),
+          const SizedBox(width: 12),
+          const Expanded(child: Text('Waiting for your contact to join…',
+            style: TextStyle(color: _white, fontSize: 13, fontWeight: FontWeight.w600))),
+        ]),
+        const SizedBox(height: 27),
+        _secondaryAction('Cancel invitation', _stopToHome, icon: Icons.close_rounded),
+      ],
+    ));
+
+    if (_page == 'waiting') return SingleChildScrollView(child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _heading(
+          _role == 'A' ? 'Review connection request' : 'Awaiting confirmation',
+          _role == 'A'
+            ? 'Someone used your invitation. Confirm this is the person you intended to connect with.'
+            : 'Your invitation was accepted. The contact who invited you must confirm this connection.',
+          eyebrow: 'PRIVATE CONNECTION',
+        ),
+        const SizedBox(height: 24),
+        _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Align(alignment: Alignment.centerLeft,
+            child: _statusChip(
+              _sessionState == 'awaiting_approval' ? 'AWAITING APPROVAL' : 'CONNECTING',
+              icon: Icons.schedule_rounded, color: _orange)),
+          const SizedBox(height: 20),
+          const Text('Connection safety code', style: TextStyle(
+            color: _white, fontWeight: FontWeight.w700, fontSize: 15)),
+          const SizedBox(height: 8),
+          const Text('Compare this code on both phones before discussing anything private.',
+            style: TextStyle(color: _muted, fontSize: 12, height: 1.4)),
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 17),
+            decoration: BoxDecoration(color: _field,
+              borderRadius: BorderRadius.circular(12)),
+            child: Text(_safetyCode ?? 'Generating code…',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _orange, fontSize: 23,
+                fontWeight: FontWeight.w800, letterSpacing: 2.1)),
+          ),
+          if (_role == 'A' && _sessionState == 'awaiting_approval') ...[
+            const SizedBox(height: 19),
+            _primaryAction(_busy ? 'Confirming…' : 'Confirm this contact', _approve,
+              disabled: _busy, icon: Icons.check_rounded),
+          ],
+        ])),
+        const SizedBox(height: 22),
+        _secondaryAction('Cancel connection', _confirmEnd,
+          icon: Icons.close_rounded, danger: true),
+      ],
+    ));
+
     if (_page == 'chat') return Column(children: [
       _card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Row(children: [Icon(Icons.lock_outline, color: _green, size: 18), SizedBox(width: 8),
-          Text('Encrypted session', style: TextStyle(color: _green, fontWeight: FontWeight.bold))]),
-        const SizedBox(height: 5), Text('Safety: ${_safetyCode ?? "Not available"}',
-          style: const TextStyle(fontSize: 12, color: Colors.white70)),
-        const Text('Verify on both phones to detect server-side key substitution.',
-          style: TextStyle(color: Colors.amberAccent, fontSize: 10)),
-      ])),
-      const SizedBox(height: 7),
-      Expanded(child: ListView.builder(controller: _scroll,
-        itemCount: _messages.length, itemBuilder: (context, i) {
-          final m = _messages[i];
-          return Align(alignment: m.mine ? Alignment.centerRight : Alignment.centerLeft,
-            child: Container(margin: const EdgeInsets.symmetric(vertical: 5),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * .75),
-              decoration: BoxDecoration(color: m.mine ? const Color(0xFF174D47) : _surface,
-                borderRadius: BorderRadius.circular(15)), child: Text(m.text)));
-        })),
-      Row(children: [Expanded(child: TextField(controller: _messageInput, maxLength: 2000,
-        maxLines: 3, minLines: 1,
-        decoration: const InputDecoration(hintText: 'Encrypted message…', counterText: ''))),
-        const SizedBox(width: 8), IconButton.filled(onPressed: _busy ? null : _sendMessage,
-          style: IconButton.styleFrom(backgroundColor: _green, foregroundColor: _panel),
-          icon: const Icon(Icons.send_rounded))]),
-      const SizedBox(height: 8),
-      OutlinedButton.icon(onPressed: _endChat,
-        icon: const Icon(Icons.delete_forever_outlined, color: Colors.redAccent),
-        label: const Text('End session & erase local chat')),
+        Row(children: [
+          _iconTile(Icons.person_outline_rounded, color: _teal),
+          const SizedBox(width: 12),
+          const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Private contact', style: TextStyle(
+              color: _white, fontSize: 16, fontWeight: FontWeight.w800)),
+            SizedBox(height: 4),
+            Text('Temporary conversation', style: TextStyle(
+              color: _muted, fontSize: 12)),
+          ])),
+          _statusChip('CONNECTED', icon: Icons.circle, color: _teal),
+        ]),
+        const SizedBox(height: 14),
+        Text('Safety code  ${_safetyCode ?? "Unavailable"}',
+          style: const TextStyle(color: _muted, fontSize: 12)),
+        const SizedBox(height: 4),
+        const Text('Compare on both devices to detect unexpected key changes.',
+          style: TextStyle(color: Color(0xFFF0BE80), fontSize: 10)),
+      ], padding: const EdgeInsets.all(16)),
+      const SizedBox(height: 16),
+      Expanded(child: _messages.isEmpty
+        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.chat_bubble_outline_rounded,
+              size: 46, color: _muted.withValues(alpha: 0.7)),
+            const SizedBox(height: 12),
+            const Text('Your conversation starts here', style: TextStyle(
+              fontWeight: FontWeight.w700, color: _white, fontSize: 15)),
+            const SizedBox(height: 7),
+            const Text('Messages appear during this session. Check the safety code on both phones.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: _muted, fontSize: 12, height: 1.45)),
+          ]))
+        : ListView.builder(
+            controller: _scroll,
+            padding: const EdgeInsets.only(bottom: 14),
+            itemCount: _messages.length,
+            itemBuilder: (context, index) {
+              final message = _messages[index];
+              return Align(
+                alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.77),
+                  margin: const EdgeInsets.symmetric(vertical: 5),
+                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: message.mine ? const Color(0xFF3D341F) : _surface,
+                    border: Border.all(color: message.mine
+                      ? _orange.withValues(alpha: 0.26) : _stroke),
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
+                      bottomLeft: Radius.circular(message.mine ? 16 : 5),
+                      bottomRight: Radius.circular(message.mine ? 5 : 16),
+                    ),
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(message.mine ? 'YOU' : 'CONTACT',
+                      style: TextStyle(color: message.mine ? _orange : _teal,
+                        letterSpacing: 0.9, fontWeight: FontWeight.w800, fontSize: 9)),
+                    const SizedBox(height: 5),
+                    Text(message.text, style: const TextStyle(
+                      color: _white, fontSize: 14, height: 1.45)),
+                  ]),
+                ),
+              );
+            },
+          )),
+      Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+        Expanded(child: TextField(
+          controller: _messageInput,
+          minLines: 1, maxLines: 4, maxLength: 2000,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            hintText: 'Write a message…', counterText: '',
+            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
+        )),
+        const SizedBox(width: 9),
+        SizedBox(width: 50, height: 50, child: IconButton.filled(
+          tooltip: 'Send message',
+          onPressed: _busy ? null : _sendMessage,
+          style: IconButton.styleFrom(
+            backgroundColor: _orange, foregroundColor: _bg,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+          ),
+          icon: const Icon(Icons.send_rounded, size: 22),
+        )),
+      ]),
+      const SizedBox(height: 12),
+      _secondaryAction('End conversation', _confirmEnd,
+        icon: Icons.logout_rounded, danger: true),
     ]);
-    if (_page == 'ended') return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Icon(Icons.lock_clock_outlined, color: _green, size: 74),
-      const SizedBox(height: 20), const Text('Session ended', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700)),
-      const SizedBox(height: 9), const Text('This device discarded the session keys and chat state.',
-        textAlign: TextAlign.center, style: TextStyle(color: Colors.white70)),
-      const SizedBox(height: 22), _button('New invitation', () => _stopToHome()),
-    ]));
+
+    if (_page == 'ended') return Center(child: SingleChildScrollView(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        _iconTile(Icons.lock_clock_outlined, color: _teal),
+        const SizedBox(height: 18),
+        const Text('Conversation closed', textAlign: TextAlign.center,
+          style: TextStyle(color: _white, fontSize: 26, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 12),
+        Text(_error == null
+            ? 'This device discarded the chat messages and session keys. '
+              'A fresh invitation is required to talk again.'
+            : 'This device discarded its chat state, but the PG server did not confirm termination. '
+              'Please check the connection before using PG again.',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: _muted, fontSize: 14, height: 1.6)),
+        const SizedBox(height: 25),
+        _primaryAction('Back to conversations', _stopToHome,
+          icon: Icons.arrow_forward_rounded),
+      ]),
+    ));
+
     return const SizedBox.shrink();
   }
 }
