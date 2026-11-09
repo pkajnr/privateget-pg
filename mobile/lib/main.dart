@@ -70,6 +70,54 @@ class PgMessage {
   PgMessage(this.text, this.mine);
 }
 
+
+class PgConversation {
+  PgConversation(this.number);
+
+  final int number;
+  String page = 'inviting';
+  String sessionState = '';
+  String? inviteId, inviteCode, sessionId, role, safetyCode;
+  KeyPair? pair;
+  SimplePublicKey? publicKey;
+  SecretKey? sendKey, receiveKey;
+  final List<PgMessage> messages = <PgMessage>[];
+  String draft = '';
+  bool cleared = false;
+
+  String get title => 'Private chat $number';
+  String get status {
+    switch (page) {
+      case 'inviting': return 'Invitation ready';
+      case 'waiting': return 'Waiting for connection';
+      case 'chat': return 'Connected';
+      case 'ended': return 'Conversation ended';
+      default: return 'Private conversation';
+    }
+  }
+
+  // This only clears application-held references and does not guarantee
+  // erasure of copies made by the OS, backups or a compromised device.
+  void clearSensitive() {
+    if (cleared) return;
+    pair?.destroy();
+    sendKey?.destroy();
+    receiveKey?.destroy();
+    pair = null;
+    publicKey = null;
+    sendKey = null;
+    receiveKey = null;
+    messages.clear();
+    draft = '';
+    inviteId = null;
+    inviteCode = null;
+    sessionId = null;
+    safetyCode = null;
+    role = null;
+    cleared = true;
+  }
+}
+
 class ApiException implements Exception {
   final String message;
   ApiException(this.message);
@@ -87,20 +135,26 @@ class _PgHomeState extends State<PgHome> {
   final _inviteInput = TextEditingController();
   final _messageInput = TextEditingController();
   final _scroll = ScrollController();
-  final _messages = <PgMessage>[];
   final _keyExchange = X25519();
+  final _chats = <PgConversation>[];
+  PgConversation? _selectedChat;
+  int _chatCounter = 0;
+  static const _maxLiveChats = 4;
+
+  String get _page => _selectedChat?.page ?? 'home';
+  String? get _inviteCode => _selectedChat?.inviteCode;
+  String? get _safetyCode => _selectedChat?.safetyCode;
+  String? get _role => _selectedChat?.role;
+  String get _sessionState => _selectedChat?.sessionState ?? '';
+  List<PgMessage> get _messages =>
+      _selectedChat?.messages ?? <PgMessage>[];
   final _cipher = AesGcm.with256bits();
   HttpClient? _http;
   Timer? _ticker;
   bool _busy = false;
   bool _polling = false;
-  String _page = 'home';
-  String? _token, _deviceId, _inviteId, _inviteCode, _sessionId, _role, _safetyCode;
+  String? _token, _deviceId;
   String? _error;
-  String _sessionState = '';
-  KeyPair? _pair;
-  SimplePublicKey? _myPublicKey;
-  SecretKey? _sendKey, _receiveKey;
   bool _ending = false;
 
   @override
@@ -108,7 +162,8 @@ class _PgHomeState extends State<PgHome> {
     super.initState();
     _http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     _register();
-    _ticker = Timer.periodic(const Duration(milliseconds: 1100), (_) => _tick());
+    // Four parallel sessions, polled conservatively to respect relay limits.
+    _ticker = Timer.periodic(const Duration(seconds: 4), (_) => _tick());
   }
 
   @override
@@ -118,7 +173,9 @@ class _PgHomeState extends State<PgHome> {
     _inviteInput.dispose();
     _messageInput.dispose();
     _scroll.dispose();
-    _eraseLocal();
+    for (final chat in _chats) {
+      chat.clearSensitive();
+    }
     super.dispose();
   }
 
@@ -152,9 +209,38 @@ class _PgHomeState extends State<PgHome> {
     } catch (e) { _setError('Cannot connect to PG server at $_apiBase. $e'); }
   }
 
-  Future<void> _preparePair() async {
-    _pair = await _keyExchange.newKeyPair();
-    _myPublicKey = await _pair!.extractPublicKey() as SimplePublicKey;
+
+  // Every conversation has separate ephemeral key material, a unique
+  // invitation/session, isolated messages, and an independent draft.
+  PgConversation? _createLocalConversation(String initialPage) {
+    if (_chats.where((c) => c.page != 'ended').length >= _maxLiveChats) {
+      _setError('Up to four live conversations are supported in this alpha. End one before starting another.');
+      return null;
+    }
+    final chat = PgConversation(++_chatCounter)..page = initialPage;
+    _openChat(chat, add: true);
+    return chat;
+  }
+
+  void _openChat(PgConversation? chat, {bool add = false}) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (_selectedChat != null && !_selectedChat!.cleared) {
+      _selectedChat!.draft = _messageInput.text;
+    }
+    setState(() {
+      if (chat != null && add) _chats.add(chat);
+      _selectedChat = chat;
+      _messageInput.text = chat?.draft ?? '';
+      _error = null;
+    });
+    if (chat?.page == 'chat') _scrollDown();
+  }
+
+  void _returnHome() => _openChat(null);
+
+  Future<void> _preparePair(PgConversation chat) async {
+    chat.pair = await _keyExchange.newKeyPair();
+    chat.publicKey = await chat.pair!.extractPublicKey() as SimplePublicKey;
   }
 
   String _b64(List<int> data) => base64UrlEncode(data).replaceAll('=', '');
@@ -162,197 +248,322 @@ class _PgHomeState extends State<PgHome> {
 
   Future<void> _createInvite() async {
     if (_busy || _token == null) return;
+    final chat = _createLocalConversation('inviting');
+    if (chat == null) return;
     setState(() { _busy = true; _error = null; });
     try {
-      await _preparePair();
-      final result = await _request('POST', '/v1/invites', { 'publicKey': _b64(_myPublicKey!.bytes) });
-      if (!mounted) return;
-      setState(() {
-        _inviteId = result['id'] as String;
-        _inviteCode = result['code'] as String;
-        _role = 'A';
-        _page = 'inviting';
+      await _preparePair(chat);
+      final result = await _request('POST', '/v1/invites', {
+        'publicKey': _b64(chat.publicKey!.bytes),
       });
-    } catch (e) { _setError(e); }
-    finally { if (mounted) setState(() => _busy = false); }
+      if (!mounted || !_chats.contains(chat)) return;
+      setState(() {
+        chat.inviteId = result['id'] as String;
+        chat.inviteCode = result['code'] as String;
+        chat.role = 'A';
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          chat.clearSensitive();
+          _chats.remove(chat);
+          if (identical(_selectedChat, chat)) _selectedChat = null;
+        });
+        _setError(e);
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _acceptInvite() async {
     if (_busy || _token == null) return;
     final code = _inviteInput.text.trim();
-    if (code.length < 20) { _setError('Paste a full invitation code.'); return; }
+    if (code.length < 20) {
+      _setError('Paste a full invitation code.');
+      return;
+    }
+    final chat = _createLocalConversation('waiting');
+    if (chat == null) return;
     setState(() { _busy = true; _error = null; });
     try {
-      await _preparePair();
+      await _preparePair(chat);
       final response = await _request('POST', '/v1/invites/accept', {
         'code': code,
-        'publicKey': _b64(_myPublicKey!.bytes),
+        'publicKey': _b64(chat.publicKey!.bytes),
       });
-      if (!mounted) return;
+      if (!mounted || !_chats.contains(chat)) return;
       setState(() {
-        _role = 'B';
-        _sessionId = response['sessionId'] as String;
-        _sessionState = 'awaiting_approval';
+        chat.role = 'B';
+        chat.sessionId = response['sessionId'] as String;
+        chat.sessionState = 'awaiting_approval';
         _inviteInput.clear();
-        _page = 'waiting';
       });
-      await _fetchSession();
-    } catch (e) { _setError(e); }
-    finally { if (mounted) setState(() => _busy = false); }
+      await _fetchSession(chat);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          chat.clearSensitive();
+          _chats.remove(chat);
+          if (identical(_selectedChat, chat)) _selectedChat = null;
+        });
+        _setError(e);
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _tick() async {
     if (_polling || _token == null || !mounted || _ending) return;
-    if (_page != 'inviting' && _page != 'waiting' && _page != 'chat') return;
     _polling = true;
     try {
-      if (_page == 'inviting' && _inviteId != null) {
-        final invite = await _request('GET', '/v1/invites/$_inviteId');
-        if (invite['state'] == 'expired') { await _stopToHome(); _setError('Invitation expired. Create a new one.'); return; }
-        if (invite['sessionId'] is String) {
-          _sessionId = invite['sessionId'] as String;
-          if (mounted) setState(() => _page = 'waiting');
+      for (final chat in List<PgConversation>.of(_chats)) {
+        if (!mounted || !_chats.contains(chat) ||
+            chat.cleared || chat.page == 'ended') continue;
+        try {
+          if (chat.page == 'inviting' && chat.inviteId != null) {
+            final invite = await _request('GET', '/v1/invites/${chat.inviteId}');
+            if (!_chats.contains(chat) || chat.cleared) continue;
+            if (invite['state'] == 'expired' ||
+                invite['state'] == 'revoked') {
+              _closeLocalChat(chat);
+              continue;
+            }
+            if (invite['sessionId'] is String) {
+              chat.sessionId = invite['sessionId'] as String;
+              chat.page = 'waiting';
+            }
+          }
+          if (chat.sessionId != null) await _fetchSession(chat);
+          if (chat.page == 'chat' && chat.sessionId != null) {
+            await _pollMessages(chat);
+          }
+        } catch (e) {
+          // A server restart destroys volatile sessions in this alpha.
+          if (e is ApiException && e.message.startsWith('404:') &&
+              chat.sessionId != null) {
+            _closeLocalChat(chat);
+          } else if (identical(_selectedChat, chat)) {
+            _setError(e);
+          }
         }
       }
-      if (_sessionId != null) await _fetchSession();
-      if (_page == 'chat' && _sessionId != null) await _pollMessages();
-    } catch (e) {
-      // Network faults are shown without closing local session; do not treat an outage as verified deletion.
-      _setError(e);
-    } finally { _polling = false; }
+      if (mounted) setState(() {});
+    } finally {
+      _polling = false;
+    }
   }
 
-  Future<void> _fetchSession() async {
-    final id = _sessionId;
-    if (id == null) return;
+  Future<void> _fetchSession(PgConversation chat) async {
+    final id = chat.sessionId;
+    if (id == null || chat.cleared) return;
     final result = await _request('GET', '/v1/sessions/$id');
+    if (!_chats.contains(chat) || chat.cleared || !mounted) return;
     final state = result['state'] as String;
     if (state == 'ended') {
-      if (mounted) setState(() { _eraseLocal(); _page = 'ended'; _error = null; });
+      _closeLocalChat(chat);
       return;
     }
-    if (!mounted) return;
     final peerKey = result['peerKey'];
-    if (peerKey is String && _sendKey == null && _pair != null) await _establishKeys(peerKey);
+    if (peerKey is String && chat.sendKey == null && chat.pair != null) {
+      await _establishKeys(chat, peerKey);
+    }
+    if (!_chats.contains(chat) || chat.cleared || !mounted) return;
     setState(() {
-      _sessionState = state;
-      if (state == 'active' && _sendKey != null) _page = 'chat';
-      else _page = 'waiting';
+      chat.sessionState = state;
+      chat.page = state == 'active' && chat.sendKey != null
+          ? 'chat' : 'waiting';
     });
   }
 
-  Future<void> _establishKeys(String peer64) async {
-    final peerPublic = SimplePublicKey(_bytes(peer64), type: KeyPairType.x25519);
-    final shared = await _keyExchange.sharedSecretKey(keyPair: _pair!, remotePublicKey: peerPublic);
-    final sessionBytes = utf8.encode(_sessionId!);
+  Future<void> _establishKeys(PgConversation chat, String peer64) async {
+    final id = chat.sessionId;
+    if (id == null || chat.pair == null || chat.role == null) return;
+    final peerPublic = SimplePublicKey(_bytes(peer64),
+        type: KeyPairType.x25519);
+    final shared = await _keyExchange.sharedSecretKey(
+        keyPair: chat.pair!, remotePublicKey: peerPublic);
+    final sessionBytes = utf8.encode(id);
     final hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
-    final ab = await hkdf.deriveKey(secretKey: shared, nonce: sessionBytes, info: utf8.encode('PG-alpha-A-to-B'));
-    final ba = await hkdf.deriveKey(secretKey: shared, nonce: sessionBytes, info: utf8.encode('PG-alpha-B-to-A'));
-    _sendKey = _role == 'A' ? ab : ba;
-    _receiveKey = _role == 'A' ? ba : ab;
-    final pubA = _role == 'A' ? _myPublicKey!.bytes : peerPublic.bytes;
-    final pubB = _role == 'B' ? _myPublicKey!.bytes : peerPublic.bytes;
-    final hash = await Sha256().hash([...utf8.encode('PG-alpha-safety'), ...sessionBytes, ...pubA, ...pubB]);
-    final code = hash.bytes.take(6).map((b) => b.toRadixString(16).padLeft(2, '0')).join().toUpperCase();
-    if (mounted) setState(() => _safetyCode = '${code.substring(0,4)} ${code.substring(4,8)} ${code.substring(8,12)}');
+    final ab = await hkdf.deriveKey(secretKey: shared,
+        nonce: sessionBytes, info: utf8.encode('PG-alpha-A-to-B'));
+    final ba = await hkdf.deriveKey(secretKey: shared,
+        nonce: sessionBytes, info: utf8.encode('PG-alpha-B-to-A'));
+    if (chat.cleared) {
+      ab.destroy();
+      ba.destroy();
+      return;
+    }
+    chat.sendKey = chat.role == 'A' ? ab : ba;
+    chat.receiveKey = chat.role == 'A' ? ba : ab;
+    final pubA = chat.role == 'A' ? chat.publicKey!.bytes : peerPublic.bytes;
+    final pubB = chat.role == 'B' ? chat.publicKey!.bytes : peerPublic.bytes;
+    final hash = await Sha256().hash([
+      ...utf8.encode('PG-alpha-safety'), ...sessionBytes, ...pubA, ...pubB
+    ]);
+    final code = hash.bytes.take(6)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join().toUpperCase();
+    if (!chat.cleared) {
+      chat.safetyCode =
+          '${code.substring(0, 4)} ${code.substring(4, 8)} ${code.substring(8, 12)}';
+    }
   }
 
   Future<void> _approve() async {
-    if (_busy || _sessionId == null) return;
+    final chat = _selectedChat;
+    if (_busy || chat?.sessionId == null) return;
     setState(() { _busy = true; _error = null; });
-    try { await _request('POST', '/v1/sessions/$_sessionId/approve', {}); await _fetchSession(); }
-    catch (e) { _setError(e); }
-    finally { if (mounted) setState(() => _busy = false); }
+    try {
+      await _request('POST', '/v1/sessions/${chat!.sessionId}/approve', {});
+      await _fetchSession(chat);
+    } catch (e) {
+      _setError(e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _sendMessage() async {
-    if (_busy || _sendKey == null || _sessionId == null || _page != 'chat') return;
+    final chat = _selectedChat;
+    if (_busy || chat?.sendKey == null || chat?.sessionId == null ||
+        chat?.page != 'chat') return;
     final text = _messageInput.text.trim();
     if (text.isEmpty || text.length > 2000) return;
-    final sendingSession = _sessionId;
+    final id = chat!.sessionId!;
+    final key = chat.sendKey!;
+    final role = chat.role!;
     setState(() { _busy = true; _error = null; });
     try {
       final rand = Random.secure();
       final nonce = List<int>.generate(12, (_) => rand.nextInt(256));
-      final aad = utf8.encode('PG|$_sessionId|$_role');
-      final box = await _cipher.encrypt(utf8.encode(text), secretKey: _sendKey!, nonce: nonce, aad: aad);
-      await _request('POST', '/v1/sessions/$_sessionId/messages', {
-        'iv': _b64(box.nonce), 'ciphertext': _b64(box.cipherText), 'mac': _b64(box.mac.bytes),
+      final box = await _cipher.encrypt(utf8.encode(text),
+          secretKey: key, nonce: nonce,
+          aad: utf8.encode('PG|$id|$role'));
+      await _request('POST', '/v1/sessions/$id/messages', {
+        'iv': _b64(box.nonce),
+        'ciphertext': _b64(box.cipherText),
+        'mac': _b64(box.mac.bytes),
       });
-      if (!mounted || _page != 'chat' || sendingSession != _sessionId) return;
-      setState(() { _messages.add(PgMessage(text, true)); _messageInput.clear(); });
-      _scrollDown();
-    } catch (e) { _setError(e); }
-    finally { if (mounted) setState(() => _busy = false); }
+      if (!mounted || chat.cleared || !_chats.contains(chat)) return;
+      setState(() {
+        chat.messages.add(PgMessage(text, true));
+        if (identical(_selectedChat, chat)) {
+          _messageInput.clear();
+          chat.draft = '';
+        }
+      });
+      if (identical(_selectedChat, chat)) _scrollDown();
+    } catch (e) {
+      _setError(e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
-  Future<void> _pollMessages() async {
-    if (_receiveKey == null || _sessionId == null) return;
-    final readingSession = _sessionId;
-    final answer = await _request('GET', '/v1/sessions/$_sessionId/messages');
+  Future<void> _pollMessages(PgConversation chat) async {
+    final id = chat.sessionId;
+    final key = chat.receiveKey;
+    if (id == null || key == null || chat.cleared) return;
+    final answer = await _request('GET', '/v1/sessions/$id/messages');
     final items = (answer['messages'] as List<dynamic>?) ?? [];
-    if (items.isEmpty) return;
+    if (items.isEmpty || chat.cleared || !_chats.contains(chat)) return;
     final newItems = <PgMessage>[];
+    final opposite = chat.role == 'A' ? 'B' : 'A';
     for (final item in items) {
       try {
         final m = item as Map<String, dynamic>;
-        final opposite = _role == 'A' ? 'B' : 'A';
         final box = SecretBox(_bytes(m['ciphertext'] as String),
-          nonce: _bytes(m['iv'] as String), mac: Mac(_bytes(m['mac'] as String)));
-        final clear = await _cipher.decrypt(box, secretKey: _receiveKey!, aad: utf8.encode('PG|$_sessionId|$opposite'));
+            nonce: _bytes(m['iv'] as String),
+            mac: Mac(_bytes(m['mac'] as String)));
+        final clear = await _cipher.decrypt(box,
+            secretKey: key, aad: utf8.encode('PG|$id|$opposite'));
         newItems.add(PgMessage(utf8.decode(clear), false));
       } catch (_) {
-        newItems.add(PgMessage('Encrypted message failed authentication', false));
+        newItems.add(PgMessage('Message authentication failed', false));
       }
     }
-    if (mounted && _page == 'chat' && readingSession == _sessionId) setState(() => _messages.addAll(newItems));
-    _scrollDown();
+    if (!mounted || chat.cleared || !_chats.contains(chat)) return;
+    setState(() => chat.messages.addAll(newItems));
+    if (identical(_selectedChat, chat)) _scrollDown();
+  }
+
+  void _closeLocalChat(PgConversation chat) {
+    chat.clearSensitive();
+    chat.page = 'ended';
+    if (mounted) {
+      setState(() {
+        if (identical(_selectedChat, chat)) _messageInput.clear();
+      });
+    }
   }
 
   Future<void> _endChat() async {
-    if (_ending) return;
+    final chat = _selectedChat;
+    if (_ending || chat == null) return;
     _ending = true;
+    final sessionId = chat.sessionId;
     try {
-      if (_sessionId != null) await _request('POST', '/v1/sessions/$_sessionId/end', {});
-    } catch (e) { _setError('Server did not confirm session termination. $e'); }
-    finally {
-      if (mounted) setState(() { _eraseLocal(); _page = 'ended'; });
+      if (sessionId != null) {
+        await _request('POST', '/v1/sessions/$sessionId/end', {});
+      }
+    } catch (e) {
+      _setError('Server did not confirm session termination. $e');
+    } finally {
+      _closeLocalChat(chat);
       _ending = false;
     }
   }
 
-  void _eraseLocal() {
-    _pair?.destroy();
-    _sendKey?.destroy();
-    _receiveKey?.destroy();
-    _pair = null;
-    _myPublicKey = null;
-    _sendKey = null;
-    _receiveKey = null;
-    _messages.clear();
-    _messageInput.clear();
-    _inviteInput.clear();
-    _inviteCode = null;
-    _inviteId = null;
-    _sessionId = null;
-    _safetyCode = null;
-    _sessionState = '';
-    _role = null;
+  Future<void> _stopToHome() async {
+    final chat = _selectedChat;
+    if (chat == null) return;
+    final inviteId = chat.inviteId;
+    final sessionId = chat.sessionId;
+    try {
+      if (chat.page != 'ended' && inviteId != null) {
+        await _request('POST', '/v1/invites/$inviteId/revoke', {});
+      } else if (chat.page != 'ended' && sessionId != null) {
+        await _request('POST', '/v1/sessions/$sessionId/end', {});
+      }
+    } catch (e) {
+      _setError('Could not confirm termination on server: $e');
+    }
+    chat.clearSensitive();
+    if (!mounted) return;
+    setState(() {
+      _chats.remove(chat);
+      if (identical(_selectedChat, chat)) {
+        _selectedChat = null;
+        _messageInput.clear();
+      }
+    });
   }
 
-  Future<void> _stopToHome() async {
-    final id = _inviteId;
-    final session = _sessionId;
-    try {
-      if (id != null) await _request('POST', '/v1/invites/$id/revoke', {});
-      else if (session != null) await _request('POST', '/v1/sessions/$session/end', {});
-    } catch (e) { _setError('Could not confirm cancellation on server: $e'); }
-    if (mounted) setState(() { _eraseLocal(); _page = 'home'; });
+  void _scrollDown() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final max = _scroll.position.maxScrollExtent;
+      _scroll.animateTo(max,
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut);
+    });
   }
-  void _scrollDown() { WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (_scroll.hasClients) _scroll.animateTo(_scroll.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 160), curve: Curves.easeOut);
-  }); }
+
+  void _showSafetyCode() {
+    final code = _selectedChat?.safetyCode ?? 'Unavailable';
+    showDialog<void>(context: context, builder: (ctx) => AlertDialog(
+      backgroundColor: _surface,
+      title: const Text('Verify this conversation'),
+      content: Text('Safety code: $code\n\nCompare it with your contact '
+          'over another trusted channel. This alpha protocol is not audited.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close')),
+      ],
+    ));
+  }
 
   // PG Interface v0.5 — AWS-inspired navy, warm orange, and clear action hierarchy.
   // The security warning remains prominent: styling does not imply a security audit.
