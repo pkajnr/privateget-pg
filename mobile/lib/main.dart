@@ -84,8 +84,38 @@ class PgConversation {
   final List<PgMessage> messages = <PgMessage>[];
   String draft = '';
   bool cleared = false;
+  String? nickname;
+  int unreadCount = 0;
 
-  String get title => 'Private chat $number';
+  // Session names exist only in this app's volatile memory; the relay
+  // receives neither nicknames nor read counters.
+  String get title => nickname ?? 'Private chat $number';
+  String get initials {
+    final pieces = title.trim().split(RegExp(r'\\s+'));
+    if (pieces.length > 1) {
+      return ('${pieces[0][0]}${pieces[1][0]}').toUpperCase();
+    }
+    final word = pieces.first;
+    return word.substring(0, word.length < 2 ? word.length : 2).toUpperCase();
+  }
+
+  void rename(String name) {
+    final clean = name.trim();
+    nickname = clean.isEmpty ? null
+        : clean.substring(0, clean.length > 24 ? 24 : clean.length);
+  }
+
+  void receive(List<PgMessage> items, {required bool visible}) {
+    if (cleared || page == 'ended') return;
+    messages.addAll(items);
+    if (visible) {
+      unreadCount = 0;
+    } else {
+      unreadCount += items.length;
+    }
+  }
+
+  void markRead() => unreadCount = 0;
   String get status {
     switch (page) {
       case 'inviting': return 'Invitation ready';
@@ -109,6 +139,8 @@ class PgConversation {
     receiveKey = null;
     messages.clear();
     draft = '';
+    nickname = null;
+    unreadCount = 0;
     inviteId = null;
     inviteCode = null;
     sessionId = null;
@@ -148,6 +180,11 @@ class _PgHomeState extends State<PgHome> {
   String get _sessionState => _selectedChat?.sessionState ?? '';
   List<PgMessage> get _messages =>
       _selectedChat?.messages ?? <PgMessage>[];
+  int get _totalUnread => _chats
+      .where((c) => !c.cleared && c.page != 'ended')
+      .fold<int>(0, (count, c) => count + c.unreadCount);
+  int get _activeCount => _chats
+      .where((c) => !c.cleared && c.page != 'ended').length;
   final _cipher = AesGcm.with256bits();
   HttpClient? _http;
   Timer? _ticker;
@@ -230,6 +267,7 @@ class _PgHomeState extends State<PgHome> {
     setState(() {
       if (chat != null && add) _chats.add(chat);
       _selectedChat = chat;
+      if (chat != null) chat.markRead();
       _messageInput.text = chat?.draft ?? '';
       _error = null;
     });
@@ -485,7 +523,8 @@ class _PgHomeState extends State<PgHome> {
       }
     }
     if (!mounted || chat.cleared || !_chats.contains(chat)) return;
-    setState(() => chat.messages.addAll(newItems));
+    setState(() => chat.receive(newItems,
+        visible: identical(_selectedChat, chat) && chat.page == 'chat'));
     if (identical(_selectedChat, chat)) _scrollDown();
   }
 
