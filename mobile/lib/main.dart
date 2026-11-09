@@ -633,6 +633,122 @@ class _PgHomeState extends State<PgHome> {
     setState(() => chat.rename(chosen));
   }
 
+  // WhatsApp Status-inspired horizontal session selector.
+  // Nicknames and unread counters never leave this device.
+  Widget _sessionStrip() {
+    final live = _chats.where((chat) =>
+        !chat.cleared && chat.page != 'ended').toList(growable: false);
+    if (live.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: _stroke))),
+      padding: const EdgeInsets.fromLTRB(0, 10, 0, 8),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 17),
+          child: Row(children: [
+            const Text('SESSIONS', style: TextStyle(
+              color: _muted, fontWeight: FontWeight.w800,
+              letterSpacing: 1.3, fontSize: 10)),
+            const SizedBox(width: 9),
+            Text('${live.length} active',
+              style: const TextStyle(color: _muted, fontSize: 11)),
+            const Spacer(),
+            if (_totalUnread > 0) Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(color: _orange,
+                borderRadius: BorderRadius.circular(14)),
+              child: Text('${_totalUnread > 99 ? '99+' : _totalUnread} unread',
+                style: const TextStyle(color: _bg,
+                  fontWeight: FontWeight.w800, fontSize: 10)),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 9),
+        SizedBox(height: 82, child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 11),
+          children: [
+            for (final chat in live)
+              Padding(padding: const EdgeInsets.only(right: 7),
+                child: SizedBox(width: 74, child: Tooltip(
+                  message: '${chat.title}: ${chat.status}. Hold to rename.',
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _openChat(chat),
+                    onLongPress: () => _renameChat(chat),
+                    child: Column(children: [
+                      SizedBox(width: 54, height: 54, child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Container(
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle, color: _field,
+                              border: Border.all(
+                                color: identical(_selectedChat, chat)
+                                    ? _orange
+                                    : chat.page == 'chat' ? _teal : _stroke,
+                                width: identical(_selectedChat, chat) ? 2.5 : 1.5)),
+                            child: Text(chat.initials, style: const TextStyle(
+                              color: _white, fontWeight: FontWeight.w800,
+                              fontSize: 15)),
+                          ),
+                          if (chat.unreadCount > 0)
+                            Positioned(right: -6, top: -4,
+                              child: Container(
+                                constraints: const BoxConstraints(minWidth: 20),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 3),
+                                decoration: BoxDecoration(color: _orange,
+                                  border: Border.all(color: _bg, width: 1.3),
+                                  borderRadius: BorderRadius.circular(20)),
+                                child: Text(chat.unreadCount > 99
+                                    ? '99+' : '${chat.unreadCount}',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: _bg,
+                                    fontSize: 10, fontWeight: FontWeight.w800)),
+                              )),
+                        ])),
+                      const SizedBox(height: 5),
+                      Text(chat.title, maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 11,
+                          color: identical(_selectedChat, chat)
+                              ? _white : _muted,
+                          fontWeight: identical(_selectedChat, chat)
+                              ? FontWeight.w800 : FontWeight.w500)),
+                    ]),
+                  ),
+                )),
+              ),
+            if (live.length < _maxLiveChats)
+              SizedBox(width: 73, child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _busy ? null : _createInvite,
+                child: Column(children: [
+                  Container(
+                    width: 54, height: 54,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _orange.withValues(alpha: 0.1),
+                      border: Border.all(color: _orange, width: 1.5)),
+                    child: const Icon(Icons.add_rounded,
+                      color: _orange, size: 26)),
+                  const SizedBox(height: 5),
+                  const Text('New chat', style: TextStyle(
+                    fontSize: 11, color: _orange)),
+                ]),
+              )),
+          ],
+        )),
+      ]),
+    );
+  }
+
   void _showSafetyCode() {
     final code = _selectedChat?.safetyCode ?? 'Unavailable';
     showDialog<void>(context: context, builder: (ctx) => AlertDialog(
