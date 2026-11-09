@@ -570,9 +570,12 @@ class _PgHomeState extends State<PgHome> {
   @override
   Widget build(BuildContext context) {
     final online = _token != null;
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final composing = online && _page == 'chat' && keyboardOpen;
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        toolbarHeight: 75,
+        toolbarHeight: composing ? 56 : 75,
         titleSpacing: 20,
         title: Row(children: [
           Container(
@@ -595,6 +598,12 @@ class _PgHomeState extends State<PgHome> {
           ]),
         ]),
         actions: [
+          if (online && _page == 'chat')
+            IconButton(
+              tooltip: 'End conversation',
+              onPressed: _confirmEnd,
+              icon: const Icon(Icons.logout_rounded, color: _danger),
+            ),
           IconButton(
             tooltip: 'Privacy and build information',
             onPressed: _showPrivacyNote,
@@ -609,7 +618,7 @@ class _PgHomeState extends State<PgHome> {
           colors: [_bg, Color(0xFF101D2E)],
         )),
         child: SafeArea(child: Column(children: [
-          Container(
+          if (!composing) Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 9),
             color: const Color(0xFF352C20),
@@ -624,10 +633,12 @@ class _PgHomeState extends State<PgHome> {
           ),
           if (_error != null) _errorBanner(),
           Expanded(child: Padding(
-            padding: const EdgeInsets.fromLTRB(19, 23, 19, 8),
+            padding: composing
+              ? const EdgeInsets.fromLTRB(12, 6, 12, 6)
+              : const EdgeInsets.fromLTRB(19, 23, 19, 8),
             child: _renderBody(online),
           )),
-          _connectionFooter(online),
+          if (!composing) _connectionFooter(online),
         ])),
       ),
     );
@@ -809,7 +820,10 @@ class _PgHomeState extends State<PgHome> {
       ],
     ));
 
-    if (_page == 'chat') return Column(children: [
+    if (_page == 'chat') {
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    return Column(children: [
+      if (!keyboardOpen) ...[
       _card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           _iconTile(Icons.person_outline_rounded, color: _teal),
@@ -831,6 +845,7 @@ class _PgHomeState extends State<PgHome> {
           style: TextStyle(color: Color(0xFFF0BE80), fontSize: 10)),
       ]), padding: const EdgeInsets.all(16)),
       const SizedBox(height: 16),
+      ],
       Expanded(child: _messages.isEmpty
         ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.chat_bubble_outline_rounded,
@@ -882,7 +897,10 @@ class _PgHomeState extends State<PgHome> {
       Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
         Expanded(child: TextField(
           controller: _messageInput,
-          minLines: 1, maxLines: 4, maxLength: 2000,
+          minLines: 1, maxLines: 2, maxLength: 2000,
+          onTap: _scrollDown,
+          keyboardType: TextInputType.multiline,
+          textInputAction: TextInputAction.newline,
           textCapitalization: TextCapitalization.sentences,
           decoration: const InputDecoration(
             hintText: 'Write a message…', counterText: '',
@@ -900,10 +918,13 @@ class _PgHomeState extends State<PgHome> {
           icon: const Icon(Icons.send_rounded, size: 22),
         )),
       ]),
-      const SizedBox(height: 12),
-      _secondaryAction('End conversation', _confirmEnd,
-        icon: Icons.logout_rounded, danger: true),
+      if (!keyboardOpen) ...[
+        const SizedBox(height: 12),
+        _secondaryAction('End conversation', _confirmEnd,
+          icon: Icons.logout_rounded, danger: true),
+      ],
     ]);
+    }
 
     if (_page == 'ended') return Center(child: SingleChildScrollView(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
