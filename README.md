@@ -1,6 +1,6 @@
 # PrivateGet (PG) — actual networked mobile app ALPHA
 
-**Status as of 9 November 2026:** Real server source, real Flutter mobile source, tested two-client networked encryption-relay flow. See [start instructions](docs/START_HERE.md). **Not yet a compiled APK, publicly hosted service, or production-secure messenger.**
+**Version 0.3 (GitHub Actions analyzer fix):** A PG-specific Flutter test and `flutter_test` dependency replace the generated counter app test. The mobile build has not yet been verified.\n\n**Status as of 9 November 2026:** Real server source, real Flutter mobile source, tested two-client networked encryption-relay flow. See [start instructions](docs/START_HERE.md). **Not yet a compiled APK, publicly hosted service, or production-secure messenger.**
 
 > ⚠️ **NOT FOR SENSITIVE MESSAGES.** This build uses standard X25519, HKDF-SHA256 and AES-256-GCM primitives, but the *protocol is experimental, not independently audited and does not implement Double Ratchet or Signal*. The server can substitute public keys; users must compare matching safety codes on both phones. Dev HTTP leaks authentication tokens and metadata to the network. Use only on an isolated, trusted development network.
 
