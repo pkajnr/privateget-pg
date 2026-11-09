@@ -860,6 +860,7 @@ class _PgHomeState extends State<PgHome> {
           ]))
         : ListView.builder(
             controller: _scroll,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: const EdgeInsets.only(bottom: 14),
             itemCount: _messages.length,
             itemBuilder: (context, index) {
@@ -898,7 +899,12 @@ class _PgHomeState extends State<PgHome> {
         Expanded(child: TextField(
           controller: _messageInput,
           minLines: 1, maxLines: 2, maxLength: 2000,
-          onTap: _scrollDown,
+          onTap: () {
+            _scrollDown();
+            Future<void>.delayed(const Duration(milliseconds: 300), () {
+              if (mounted) _scrollDown();
+            });
+          },
           keyboardType: TextInputType.multiline,
           textInputAction: TextInputAction.newline,
           textCapitalization: TextCapitalization.sentences,
