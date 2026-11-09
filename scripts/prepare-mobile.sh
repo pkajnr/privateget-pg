@@ -53,6 +53,23 @@ void main() {
   test('PG API errors contain a readable message', () {
     expect(ApiException('Invitation expired').toString(), 'Invitation expired');
   });
+
+  test('Parallel chats keep messages and invitations isolated', () {
+    final first = PgConversation(1)
+      ..inviteId = 'first-invite'
+      ..messages.add(PgMessage('Message for first chat', true));
+    final second = PgConversation(2)
+      ..inviteId = 'second-invite'
+      ..messages.add(PgMessage('Message for second chat', false));
+
+    expect(first.inviteId, isNot(second.inviteId));
+    expect(first.messages.single.text, 'Message for first chat');
+    expect(second.messages.single.text, 'Message for second chat');
+    first.clearSensitive();
+    expect(first.messages, isEmpty);
+    expect(second.messages.single.text, 'Message for second chat');
+    second.clearSensitive();
+  });
 }
 PG_TEST
 
