@@ -829,7 +829,7 @@ class _PgHomeState extends State<PgHome> {
         const SizedBox(height: 4),
         const Text('Compare on both devices to detect unexpected key changes.',
           style: TextStyle(color: Color(0xFFF0BE80), fontSize: 10)),
-      ], padding: const EdgeInsets.all(16)),
+      ]), padding: const EdgeInsets.all(16)),
       const SizedBox(height: 16),
       Expanded(child: _messages.isEmpty
         ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
