@@ -653,7 +653,7 @@ class _PgHomeState extends State<PgHome> {
               color: _muted, fontWeight: FontWeight.w800,
               letterSpacing: 1.3, fontSize: 10)),
             const SizedBox(width: 9),
-            Text('${live.length} active',
+            Text('${_activeCount} active',
               style: const TextStyle(color: _muted, fontSize: 11)),
             const Spacer(),
             if (_totalUnread > 0) Container(
@@ -1016,18 +1016,32 @@ class _PgHomeState extends State<PgHome> {
           )),
         ]),
         actions: [
-          if (online && _page == 'chat') ...[
+          if (_selectedChat != null && !_selectedChat!.cleared)
             IconButton(
-              tooltip: 'Verify safety code',
-              onPressed: _showSafetyCode,
-              icon: const Icon(Icons.verified_user_outlined, color: _muted),
+              tooltip: 'Rename conversation',
+              onPressed: () => _renameChat(_selectedChat!),
+              icon: const Icon(Icons.edit_outlined, color: _orange),
             ),
-            IconButton(
-              tooltip: 'End conversation',
-              onPressed: _confirmEnd,
-              icon: const Icon(Icons.logout_rounded, color: _danger),
-            ),
-          ] else
+          if (online && _page == 'chat')
+            PopupMenuButton<String>(
+              tooltip: 'Conversation actions',
+              icon: const Icon(Icons.more_vert_rounded, color: _white),
+              color: _surface,
+              onSelected: (value) {
+                if (value == 'verify') _showSafetyCode();
+                if (value == 'end') _confirmEnd();
+                if (value == 'about') _showPrivacyNote();
+              },
+              itemBuilder: (ctx) => const [
+                PopupMenuItem(value: 'verify',
+                  child: Text('Verify safety code')),
+                PopupMenuItem(value: 'end',
+                  child: Text('End conversation')),
+                PopupMenuItem(value: 'about',
+                  child: Text('About this alpha')),
+              ],
+            )
+          else
             IconButton(
               tooltip: 'Privacy and build information',
               onPressed: _showPrivacyNote,
@@ -1062,6 +1076,11 @@ class _PgHomeState extends State<PgHome> {
             visible: _error != null,
             maintainState: true,
             child: _error != null ? _errorBanner() : const SizedBox.shrink(),
+          ),
+          Visibility(
+            visible: !typing,
+            maintainState: true,
+            child: _sessionStrip(),
           ),
           Expanded(child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
@@ -1104,45 +1123,6 @@ class _PgHomeState extends State<PgHome> {
         _heading('A private space for your conversations.',
           'Start a temporary conversation with someone you trust, or join using their one-time invite.'),
         const SizedBox(height: 24),
-        if (_chats.isNotEmpty) ...[
-          _sectionLabel('YOUR CONVERSATIONS'),
-          const SizedBox(height: 12),
-          ..._chats.reversed.map((chat) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(18),
-              onTap: () => _openChat(chat),
-              child: _card(Row(children: [
-                _iconTile(chat.page == 'chat'
-                    ? Icons.chat_bubble_outline_rounded
-                    : chat.page == 'ended'
-                        ? Icons.lock_clock_outlined
-                        : Icons.schedule_rounded,
-                    color: chat.page == 'chat' ? _teal : _orange),
-                const SizedBox(width: 12),
-                Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(chat.title, style: const TextStyle(
-                      color: _white, fontWeight: FontWeight.w800,
-                      fontSize: 15)),
-                    const SizedBox(height: 4),
-                    Text(chat.status, style: const TextStyle(
-                      color: _muted, fontSize: 12)),
-                  ],
-                )),
-                Container(width: 7, height: 7, decoration: BoxDecoration(
-                  color: chat.page == 'chat' ? _teal
-                      : chat.page == 'ended' ? _muted : _orange,
-                  shape: BoxShape.circle,
-                )),
-                const SizedBox(width: 10),
-                const Icon(Icons.chevron_right_rounded, color: _muted),
-              ]), padding: const EdgeInsets.all(13)),
-            ),
-          )),
-          const SizedBox(height: 12),
-        ],
         _card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             _iconTile(Icons.add_comment_outlined),
