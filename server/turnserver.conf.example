@@ -1,0 +1,19 @@
+# PG Coturn configuration EXAMPLE ONLY. Do not deploy verbatim.
+# Use a separate VPS with a real public IP; Render HTTP services alone are
+# not a UDP TURN relay. Restrict inbound ports with your firewall.
+listening-port=3478
+# tls-listening-port=5349
+fingerprint
+realm=turn.your-pg-domain.example
+use-auth-secret
+static-auth-secret=REPLACE_WITH_40_PLUS_RANDOM_CHARACTERS_SAME_AS_PG_TURN_SECRET
+# external-ip=YOUR_PUBLIC_IP
+min-port=49160
+max-port=49200
+no-multicast-peers
+no-loopback-peers
+stale-nonce
+user-quota=12
+total-quota=250
+# Add TURN TLS cert/key with turns: URIs for hardened production deployments.
+# Follow the official coturn guide for UDP/TCP ports, IPv6, and TLS.
