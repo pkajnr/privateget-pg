@@ -727,6 +727,172 @@ class _PgHomeState extends State<PgHome> {
     });
   }
 
+  Future<void> _pickAndSendAttachment(String category) async {
+    final chat = _selectedChat;
+    if (_busy || chat == null || chat.page != 'chat' ||
+        chat.sessionId == null || _token == null) return;
+    try {
+      String? path;
+      String? filename;
+      String kind = category;
+      if (category == 'document') {
+        final selected = await FilePicker.pickFiles(
+          type: FileType.any, allowMultiple: false, withData: false);
+        if (selected == null || selected.files.isEmpty) return;
+        path = selected.files.single.path;
+        filename = selected.files.single.name;
+        kind = 'document';
+      } else {
+        XFile? selected;
+        if (category == 'camera') {
+          selected = await _imagePicker.pickImage(source: ImageSource.camera);
+          kind = 'image';
+        } else if (category == 'image') {
+          selected = await _imagePicker.pickImage(source: ImageSource.gallery);
+        } else if (category == 'video') {
+          selected = await _imagePicker.pickVideo(source: ImageSource.gallery);
+        }
+        if (selected == null) return;
+        path = selected.path;
+        filename = selected.name;
+      }
+      if (path == null || filename == null || !mounted ||
+          !_chats.contains(chat) || chat.cleared) return;
+      final file = File(path);
+      final fileLength = await file.length();
+      if (fileLength > pgFileMaxBytes || fileLength < 1) {
+        throw StateError('Choose a non-empty file smaller than 12 MB for PG alpha.');
+      }
+      setState(() { _busy = true; _error = null; });
+      final data = await file.readAsBytes();
+      final attachment = await pgUploadEncrypted(
+        client: _http!, apiBase: _apiBase, token: _token!,
+        sessionId: chat.sessionId!, clearBytes: data,
+        filename: filename, kind: kind);
+      if (!mounted || chat.cleared || !_chats.contains(chat)) return;
+      setState(() => _busy = false);
+      // Metadata, the random file key and filename travel INSIDE the
+      // encrypted session message, not to the attachment upload endpoint.
+      if (identical(_selectedChat, chat)) {
+        await _sendMessage(overrideText: attachment.encodeMessage());
+      } else {
+        _openChat(chat);
+        await _sendMessage(overrideText: attachment.encodeMessage());
+      }
+    } catch (error) {
+      _setError('Attachment could not be sent. $error');
+    } finally {
+      if (mounted && _busy) setState(() => _busy = false);
+    }
+  }
+
+  void _showAttachmentOptions() {
+    if (_busy || _page != 'chat') return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    showModalBottomSheet<void>(
+      context: context, backgroundColor: _surface,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.image_outlined, color: _teal),
+            title: const Text('Photo from gallery'),
+            onTap: () { Navigator.pop(sheetContext); _pickAndSendAttachment('image'); }),
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined, color: _orange),
+            title: const Text('Take a photo'),
+            onTap: () { Navigator.pop(sheetContext); _pickAndSendAttachment('camera'); }),
+          ListTile(
+            leading: const Icon(Icons.videocam_outlined, color: _teal),
+            title: const Text('Video from gallery'),
+            onTap: () { Navigator.pop(sheetContext); _pickAndSendAttachment('video'); }),
+          ListTile(
+            leading: const Icon(Icons.insert_drive_file_outlined, color: _orange),
+            title: const Text('Document or other file'),
+            subtitle: const Text('PDF, Word, Excel and more · up to 12 MB'),
+            onTap: () { Navigator.pop(sheetContext); _pickAndSendAttachment('document'); }),
+          const SizedBox(height: 12),
+        ],
+      )),
+    );
+  }
+
+  Future<void> _openReceivedAttachment(PgAttachment attachment) async {
+    final chat = _selectedChat;
+    if (chat == null || chat.page != 'chat' ||
+        chat.sessionId == null || _token == null) return;
+    try {
+      setState(() { _busy = true; _error = null; });
+      final bytes = await pgDownloadDecrypted(
+        client: _http!, apiBase: _apiBase, token: _token!,
+        sessionId: chat.sessionId!, attachment: attachment);
+      if (!mounted || chat.cleared || !_chats.contains(chat)) return;
+      setState(() => _busy = false);
+      if (attachment.kind == 'image') {
+        await showDialog<void>(context: context,
+          builder: (ctx) => Dialog(
+            backgroundColor: _bg,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Flexible(child: Image.memory(bytes, fit: BoxFit.contain)),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close image'),
+              ),
+            ]),
+          ),
+        );
+      } else {
+        final approved = await showDialog<bool>(context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Open attachment outside PG?'),
+            content: const Text('This may create a readable temporary file. '
+              'Other apps or the operating system can retain copies. '
+              'Do not open confidential files in this experimental build.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Open file')),
+            ],
+          ));
+        if (approved != true || !mounted || chat.cleared) return;
+        final directory = await getTemporaryDirectory();
+        final file = File('${directory.path}/pg_${DateTime.now().microsecondsSinceEpoch}_${pgSafeFilename(attachment.name)}');
+        await file.writeAsBytes(bytes, flush: true);
+        chat.temporaryDecryptedFiles.add(file);
+        await OpenFilex.open(file.path);
+      }
+    } catch (error) {
+      _setError('Cannot open attachment. $error');
+    } finally {
+      if (mounted && _busy) setState(() => _busy = false);
+    }
+  }
+
+  Widget _buildAttachmentBubble(PgAttachment attachment, bool mine) {
+    final icon = switch (attachment.kind) {
+      'image' => Icons.image_outlined,
+      'video' => Icons.video_file_outlined,
+      'audio' => Icons.audio_file_outlined,
+      _ => Icons.description_outlined,
+    };
+    return InkWell(
+      onTap: mine || _busy ? null : () => _openReceivedAttachment(attachment),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, color: _teal, size: 32),
+        const SizedBox(width: 10),
+        Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(attachment.name, maxLines: 2, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: _white, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 3),
+          Text(mine ? 'Sent · encrypted' : 'Tap to open · temporary',
+            style: const TextStyle(color: _muted, fontSize: 11)),
+        ])),
+      ]),
+    );
+  }
+
   void _togglePicker(String mode) {
     FocusManager.instance.primaryFocus?.unfocus();
     if (!mounted || _page != 'chat') return;
