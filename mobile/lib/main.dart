@@ -17,9 +17,11 @@ import 'pg_calls.dart';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
 const _apiBase = String.fromEnvironment('PG_API_URL', defaultValue: 'http://10.0.2.2:8787');
+const _privateAlerts = MethodChannel('pg/private_notifications');
 const _bg = Color(0xFF0B1523);
 const _surface = Color(0xFF17283B);
 const _field = Color(0xFF0E2032);
@@ -307,6 +309,9 @@ class _PgHomeState extends State<PgHome> {
     _http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     _calls = PgCallService(_sendCallSignal);
     _register();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_requestNotificationPermission());
+    });
     // Four parallel sessions, polled conservatively to respect relay limits.
     _ticker = Timer.periodic(const Duration(seconds: 4), (_) => _tick());
   }
@@ -324,6 +329,32 @@ class _PgHomeState extends State<PgHome> {
       chat.clearSensitive();
     }
     super.dispose();
+  }
+
+  // Android 13+ asks for notifications at first launch. Reopening PG doesn't
+  // repeatedly ask after the user has made a system-level choice.
+  Future<void> _requestNotificationPermission() async {
+    if (!Platform.isAndroid || !mounted) return;
+    try {
+      await _privateAlerts.invokeMethod<bool>('requestPermission');
+    } on PlatformException {
+      // Notifications are optional; denial must never block encrypted chat.
+    } on MissingPluginException {
+      // Widget tests/iOS may not have an Android channel implementation.
+    }
+  }
+
+  // Foreground alpha only: this is NOT Firebase/APNs push delivery.
+  // No plaintext, sender name, message ID or encryption keys enter OS alerts.
+  Future<void> _showPrivateIncomingNotification() async {
+    if (!Platform.isAndroid || !mounted) return;
+    try {
+      await _privateAlerts.invokeMethod<bool>('showPrivateMessage');
+    } on PlatformException {
+      // Foreground in-app notice remains as fallback.
+    } on MissingPluginException {
+      // No Android plugin in tests/iOS.
+    }
   }
 
   void _setError(Object err) {
@@ -661,7 +692,10 @@ class _PgHomeState extends State<PgHome> {
     if (showingThisChat) {
       _scrollDown();
     } else {
-      // Foreground-only notice; never include message content.
+      // OS local alert is available only while PG is running. Full background
+      // push requires a separate private push-token and server infrastructure.
+      unawaited(_showPrivateIncomingNotification());
+      // Foreground in-app notice; never include message content.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || chat.cleared || !_chats.contains(chat)) return;
         final messenger = ScaffoldMessenger.maybeOf(context);
