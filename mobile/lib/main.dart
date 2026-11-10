@@ -899,59 +899,36 @@ class _PgHomeState extends State<PgHome> {
     setState(() => _pickerMode = _pickerMode == mode ? 'none' : mode);
   }
 
-  void _appendEmoji(String glyph) {
-    if (_page != 'chat') return;
-    final input = _messageInput;
-    final old = input.value;
-    final selection = old.selection;
-    final start = selection.isValid ? selection.start : old.text.length;
-    final end = selection.isValid ? selection.end : old.text.length;
-    final updated = old.text.replaceRange(start, end, glyph);
-    if (updated.length > 2000) return;
-    input.value = TextEditingValue(
-      text: updated,
-      selection: TextSelection.collapsed(offset: start + glyph.length),
-    );
-    _selectedChat?.draft = updated;
-    setState(() => _pickerMode = 'none');
-  }
-
-  Widget _buildChatPicker() {
-    final isSticker = _pickerMode == 'sticker';
-    final choices = isSticker ? _pgStickerChoices : _pgEmojiChoices;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      constraints: const BoxConstraints(maxHeight: 162),
-      padding: const EdgeInsets.all(9),
-      decoration: BoxDecoration(
-        color: _surface,
-        border: Border.all(color: _stroke),
-        borderRadius: BorderRadius.circular(14),
+  Widget _buildChatPicker() => Container(
+    margin: const EdgeInsets.only(bottom: 8),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: _surface,
+      border: Border.all(color: _stroke),
+      borderRadius: BorderRadius.circular(18),
+    ),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      const Align(
+        alignment: Alignment.centerLeft,
+        child: Text('STICKERS', style: TextStyle(
+          color: _muted, fontSize: 11, letterSpacing: 1.2,
+          fontWeight: FontWeight.w800)),
       ),
-      child: SingleChildScrollView(
-        child: Wrap(spacing: 4, runSpacing: 4, children: [
-          for (final glyph in choices)
-            SizedBox(
-              width: isSticker ? 68 : 45,
-              height: isSticker ? 64 : 46,
-              child: IconButton(
-                tooltip: isSticker ? 'Send sticker $glyph' : 'Insert emoji $glyph',
-                padding: EdgeInsets.zero,
-                onPressed: _busy ? null : () {
-                  if (isSticker) {
-                    _sendMessage(overrideText: encodePgSticker(glyph));
-                  } else {
-                    _appendEmoji(glyph);
-                  }
-                },
-                icon: Text(glyph, style: TextStyle(
-                  fontSize: isSticker ? 39 : 29)),
-              ),
-            ),
+      const SizedBox(height: 8),
+      SizedBox(height: 116, child: SingleChildScrollView(
+        child: Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final glyph in _pgStickerChoices)
+            SizedBox(width: 62, height: 58, child: IconButton(
+              tooltip: 'Send sticker $glyph',
+              padding: EdgeInsets.zero,
+              onPressed: _busy ? null : () =>
+                  _sendMessage(overrideText: encodePgSticker(glyph)),
+              icon: Text(glyph, style: const TextStyle(fontSize: 38)),
+            )),
         ]),
-      ),
-    );
-  }
+      )),
+    ]),
+  );
 
   void _scrollDown() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1668,51 +1645,84 @@ class _PgHomeState extends State<PgHome> {
                       style: TextStyle(color: message.mine ? _orange : _teal,
                         letterSpacing: 0.9, fontWeight: FontWeight.w800, fontSize: 9)),
                     const SizedBox(height: 5),
-                    Text(
-                      decodePgSticker(message.text) ?? message.text,
-                      style: TextStyle(
-                        color: _white,
-                        fontSize: decodePgSticker(message.text) == null ? 14 : 43,
-                        height: 1.45,
+                    if (PgAttachment.fromMessage(message.text) != null)
+                      _buildAttachmentBubble(
+                        PgAttachment.fromMessage(message.text)!, message.mine)
+                    else if (message.text.startsWith(pgFilePrefix))
+                      const Text('Unsupported attachment', style: TextStyle(color: _muted))
+                    else
+                      Text(
+                        decodePgSticker(message.text) ?? message.text,
+                        style: TextStyle(
+                          color: _white,
+                          fontSize: decodePgSticker(message.text) == null ? 14 : 43,
+                          height: 1.45,
+                        ),
                       ),
-                    ),
                   ]),
                 ),
               );
             },
           )),
-      if (_pickerMode != 'none') _buildChatPicker(),
+      if (_pickerMode == 'sticker') _buildChatPicker(),
       Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
         IconButton(
-          tooltip: 'Emojis',
-          icon: const Icon(Icons.emoji_emotions_outlined, color: _orange),
-          onPressed: () => _togglePicker('emoji'),
+          tooltip: 'Attach photo, video or document',
+          icon: const Icon(Icons.add_circle_outline_rounded, color: _teal),
+          onPressed: _busy ? null : _showAttachmentOptions,
         ),
+        Expanded(child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(25),
+            color: _field,
+            border: Border.all(color: _stroke),
+          ),
+          child: Row(children: [
+            Expanded(child: TextField(
+              controller: _messageInput,
+              focusNode: _messageFocus,
+              minLines: 1, maxLines: 3, maxLength: 2000,
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                hintText: 'Message', counterText: '',
+                border: InputBorder.none, enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 11),
+              ),
+            )),
+            IconButton(
+              tooltip: 'Use the phone emoji keyboard',
+              icon: const Icon(Icons.emoji_emotions_outlined, color: _muted),
+              onPressed: () {
+                if (_pickerMode != 'none') {
+                  setState(() => _pickerMode = 'none');
+                }
+                _messageFocus.requestFocus();
+              },
+            ),
+          ]),
+        )),
         IconButton(
-          tooltip: 'Stickers',
-          icon: const Icon(Icons.auto_awesome_outlined, color: _teal),
+          tooltip: 'Open sticker tray',
+          icon: const Icon(Icons.sticky_note_2_outlined, color: _teal),
           onPressed: () => _togglePicker('sticker'),
         ),
-        Expanded(child: TextField(
-          controller: _messageInput,
-          minLines: 1, maxLines: 2, maxLength: 2000,
-          keyboardType: TextInputType.multiline,
-          textInputAction: TextInputAction.newline,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            hintText: 'Write a message…', counterText: '',
-            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          ),
-        )),
-        const SizedBox(width: 9),
-        SizedBox(width: 50, height: 50, child: IconButton.filled(
+        IconButton(
+          tooltip: 'Take photo',
+          icon: const Icon(Icons.camera_alt_outlined, color: _muted),
+          onPressed: _busy ? null : () => _pickAndSendAttachment('camera'),
+        ),
+        SizedBox(width: 46, height: 48, child: IconButton.filled(
           tooltip: 'Send message',
           onPressed: _busy ? null : () => _sendMessage(),
           style: IconButton.styleFrom(
             backgroundColor: _orange, foregroundColor: _bg,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+            shape: const CircleBorder(),
           ),
-          icon: const Icon(Icons.send_rounded, size: 22),
+          icon: const Icon(Icons.send_rounded, size: 20),
         )),
       ]),
 
