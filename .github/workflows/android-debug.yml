@@ -17,6 +17,10 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Test PG relay and media/call endpoints
+        run: |
+          node server/test.mjs
+          node server/media.test.mjs
       - name: Create native project
         run: bash scripts/prepare-mobile.sh
       - name: Build debug Android APK

@@ -1,0 +1,28 @@
+name: Verify PG media and calling branch
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - feature/pg-attachments-calls-ui-20261110
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Test relay API, binary ciphertext and call signaling
+        run: |
+          node server/test.mjs
+          node server/media.test.mjs
+      - name: Prepare mobile and run Dart checks
+        run: bash scripts/prepare-mobile.sh
+      - name: Compile test-only Android APK
+        working-directory: mobile
+        run: flutter build apk --debug --dart-define=PG_API_URL=https://pg-test.invalid

@@ -7,6 +7,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'pg_media.dart';
+import 'pg_calls.dart';
+
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
@@ -74,10 +82,6 @@ String buildInvitationShareText(String code) =>
     'Please do not forward it to anyone else.';
 
 // These large emoji stickers travel inside PG's existing encrypted text channel.
-const _pgEmojiChoices = <String>[
-  '😀','😂','🥰','😍','😊','😎','😢','😮','❤️','💕','👍','🙏',
-  '👏','🔥','🎉','✅','👋','💯','💪','✨','🤗','🤔','🥳','😴',
-];
 const _pgStickerChoices = <String>[
   '🥳','❤️','😂','😍','🔥','👏','💯','🤗','🙏','🎉','💪','👋',
 ];
@@ -114,6 +118,7 @@ class PgConversation {
   SimplePublicKey? publicKey;
   SecretKey? sendKey, receiveKey;
   final List<PgMessage> messages = <PgMessage>[];
+  final List<File> temporaryDecryptedFiles = <File>[];
   String draft = '';
   bool cleared = false;
   String? nickname;
@@ -171,6 +176,11 @@ class PgConversation {
     sendKey = null;
     receiveKey = null;
     messages.clear();
+    // Best-effort OS-cache cleanup; external viewers may copy the file.
+    for (final file in temporaryDecryptedFiles) {
+      unawaited(file.delete().catchError((Object _) => file));
+    }
+    temporaryDecryptedFiles.clear();
     draft = '';
     nickname = null;
     unreadCount = 0;
@@ -258,6 +268,10 @@ class PgHome extends StatefulWidget {
 class _PgHomeState extends State<PgHome> {
   final _inviteInput = TextEditingController();
   final _messageInput = TextEditingController();
+  final _messageFocus = FocusNode();
+  final _imagePicker = ImagePicker();
+  late final PgCallService _calls;
+  bool _showingCallPanel = false;
   final _scroll = ScrollController();
   final _keyExchange = X25519();
   final _chats = <PgConversation>[];
@@ -285,12 +299,13 @@ class _PgHomeState extends State<PgHome> {
   String? _token, _deviceId;
   String? _error;
   bool _ending = false;
-  String _pickerMode = 'none'; // none, emoji, sticker
+  String _pickerMode = 'none'; // none or sticker
 
   @override
   void initState() {
     super.initState();
     _http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    _calls = PgCallService(_sendCallSignal);
     _register();
     // Four parallel sessions, polled conservatively to respect relay limits.
     _ticker = Timer.periodic(const Duration(seconds: 4), (_) => _tick());
@@ -299,9 +314,11 @@ class _PgHomeState extends State<PgHome> {
   @override
   void dispose() {
     _ticker?.cancel();
+    unawaited(_calls.shutdown());
     _http?.close(force: true);
     _inviteInput.dispose();
     _messageInput.dispose();
+    _messageFocus.dispose();
     _scroll.dispose();
     for (final chat in _chats) {
       chat.clearSensitive();
@@ -486,6 +503,7 @@ class _PgHomeState extends State<PgHome> {
           if (chat.sessionId != null) await _fetchSession(chat);
           if (chat.page == 'chat' && chat.sessionId != null) {
             await _pollMessages(chat);
+            await _pollCallSignals(chat);
           }
         } catch (e) {
           // A server restart destroys volatile sessions in this alpha.
@@ -663,6 +681,9 @@ class _PgHomeState extends State<PgHome> {
   }
 
   void _closeLocalChat(PgConversation chat) {
+    if (_calls.sessionId == chat.sessionId && _calls.callId != null) {
+      unawaited(_calls.close(sendEnd: false));
+    }
     chat.clearSensitive();
     chat.page = 'ended';
     if (mounted) {
@@ -703,6 +724,9 @@ class _PgHomeState extends State<PgHome> {
     } catch (e) {
       _setError('Could not confirm termination on server: $e');
     }
+    if (_calls.sessionId == sessionId && _calls.callId != null) {
+      await _calls.close(sendEnd: false);
+    }
     chat.clearSensitive();
     if (!mounted) return;
     setState(() {
@@ -714,65 +738,374 @@ class _PgHomeState extends State<PgHome> {
     });
   }
 
+  Future<void> _sendCallSignal(
+    String sid, String cid, String type, Map<String, dynamic> data) async {
+    await _request('POST', '/v1/sessions/$sid/call', {
+      'callId': cid, 'type': type, 'data': data,
+    });
+  }
+
+  Future<bool> _confirmIncomingCall(PgConversation chat, bool isVideo) async {
+    if (!mounted || chat.cleared || !_chats.contains(chat)) return false;
+    final accepted = await showDialog<bool>(context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _surface,
+        title: Text(isVideo ? 'Incoming PG video call' : 'Incoming PG voice call'),
+        content: const Text('This is an experimental, unaudited WebRTC call. '
+          'Accept only from a contact whose safety code you verified.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Decline')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Answer')),
+        ],
+      ));
+    if (accepted == true && mounted && !chat.cleared) {
+      _openChat(chat);
+    }
+    return accepted == true && mounted && !chat.cleared;
+  }
+
+  Future<void> _pollCallSignals(PgConversation chat) async {
+    final sid = chat.sessionId;
+    if (sid == null || chat.cleared) return;
+    final data = await _request('GET', '/v1/sessions/$sid/call');
+    final signals = data['signals'];
+    if (signals is! List) return;
+    for (final item in signals) {
+      if (!mounted || chat.cleared || !_chats.contains(chat)) break;
+      try {
+        await _calls.handle(
+          sid, Map<String, dynamic>.from(item as Map),
+          confirmIncoming: (video) => _confirmIncomingCall(chat, video),
+        );
+        if (_calls.sessionId == sid &&
+            _calls.callId != null && !_showingCallPanel) {
+          unawaited(_openCallPanel());
+        }
+      } catch (error) {
+        _setError('Call signaling failed. $error');
+      }
+    }
+  }
+
+  Future<void> _startCall(bool video) async {
+    final chat = _selectedChat;
+    if (chat == null || chat.page != 'chat' || chat.sessionId == null ||
+        _calls.callId != null || _busy) return;
+    try {
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(video ? 'Start video call?' : 'Start voice call?'),
+          content: const Text(
+            'Experimental PG calls are not security-audited. '
+            'WebRTC and the STUN service may learn network metadata '
+            'including IP addresses. This is for testing, not confidential calls.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Call')),
+          ],
+        ),
+      );
+      if (approved != true || !mounted || chat.cleared ||
+          !_chats.contains(chat) || chat.page != 'chat') return;
+      await _calls.dial(chat.sessionId!, withVideo: video);
+      if (mounted && _calls.callId != null) unawaited(_openCallPanel());
+    } catch (error) {
+      _setError('Unable to start call. $error');
+    }
+  }
+
+  Future<void> _openCallPanel() async {
+    if (!mounted || _showingCallPanel) return;
+    _showingCallPanel = true;
+    try {
+      await showDialog<void>(
+        context: context, barrierDismissible: false,
+        builder: (dialogContext) => PopScope<void>(
+          canPop: false,
+          child: Dialog(
+            backgroundColor: _bg,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 12),
+            child: AnimatedBuilder(
+              animation: _calls,
+              builder: (ctx, _) => Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(_calls.video ? Icons.videocam_rounded : Icons.call_rounded,
+                    size: 32, color: _teal),
+                  const SizedBox(height: 10),
+                  Text(_calls.callId == null ? 'Call ended'
+                      : _calls.active ? 'PG call connected' : 'Connecting PG call…',
+                    style: const TextStyle(color: _white, fontSize: 19,
+                      fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  const Text('EXPERIMENTAL · NOT SECURITY AUDITED',
+                    style: TextStyle(color: _danger, fontSize: 10)),
+                  const SizedBox(height: 16),
+                  if (_calls.video && _calls.callId != null)
+                    SizedBox(height: 270, child: Stack(children: [
+                      Positioned.fill(child: RTCVideoView(
+                        _calls.remoteVideo,
+                        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)),
+                      Positioned(right: 8, bottom: 8, width: 100, height: 125,
+                        child: RTCVideoView(_calls.localVideo, mirror: true)),
+                    ]))
+                  else
+                    const SizedBox(height: 110, child: Center(
+                      child: Icon(Icons.record_voice_over_rounded,
+                        size: 76, color: _muted))),
+                  const SizedBox(height: 15),
+                  if (_calls.callId != null)
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      IconButton.filledTonal(
+                        tooltip: _calls.muted ? 'Unmute' : 'Mute',
+                        onPressed: _calls.toggleMute,
+                        icon: Icon(_calls.muted ? Icons.mic_off_rounded : Icons.mic_rounded)),
+                      if (_calls.video) ...[
+                        const SizedBox(width: 10),
+                        IconButton.filledTonal(
+                          tooltip: 'Toggle camera',
+                          onPressed: _calls.toggleCamera,
+                          icon: const Icon(Icons.videocam_off_outlined)),
+                      ],
+                      const SizedBox(width: 16),
+                      IconButton.filled(
+                        tooltip: 'Hang up',
+                        style: IconButton.styleFrom(backgroundColor: _danger),
+                        onPressed: () async {
+                          await _calls.close();
+                          if (dialogContext.mounted) Navigator.pop(dialogContext);
+                        },
+                        icon: const Icon(Icons.call_end_rounded, color: _bg)),
+                    ])
+                  else
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('Close'),
+                    ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _showingCallPanel = false;
+    }
+  }
+
+  Future<void> _pickAndSendAttachment(String category) async {
+    final chat = _selectedChat;
+    if (_busy || chat == null || chat.page != 'chat' ||
+        chat.sessionId == null || _token == null) return;
+    try {
+      String? path;
+      String? filename;
+      String kind = category;
+      if (category == 'document') {
+        final selected = await FilePicker.pickFiles(
+          type: FileType.any, allowMultiple: false, withData: false);
+        if (selected == null || selected.files.isEmpty) return;
+        path = selected.files.single.path;
+        filename = selected.files.single.name;
+        kind = 'document';
+      } else {
+        XFile? selected;
+        if (category == 'camera') {
+          selected = await _imagePicker.pickImage(source: ImageSource.camera);
+          kind = 'image';
+        } else if (category == 'image') {
+          selected = await _imagePicker.pickImage(source: ImageSource.gallery);
+        } else if (category == 'video') {
+          selected = await _imagePicker.pickVideo(source: ImageSource.gallery);
+        }
+        if (selected == null) return;
+        path = selected.path;
+        filename = selected.name;
+      }
+      if (path == null || filename == null || !mounted ||
+          !_chats.contains(chat) || chat.cleared) return;
+      final file = File(path);
+      final fileLength = await file.length();
+      if (fileLength > pgFileMaxBytes || fileLength < 1) {
+        throw StateError('Choose a non-empty file smaller than 12 MB for PG alpha.');
+      }
+      setState(() { _busy = true; _error = null; });
+      final data = await file.readAsBytes();
+      final attachment = await pgUploadEncrypted(
+        client: _http!, apiBase: _apiBase, token: _token!,
+        sessionId: chat.sessionId!, clearBytes: data,
+        filename: filename, kind: kind);
+      if (!mounted || chat.cleared || !_chats.contains(chat)) return;
+      setState(() => _busy = false);
+      // Metadata, the random file key and filename travel INSIDE the
+      // encrypted session message, not to the attachment upload endpoint.
+      if (identical(_selectedChat, chat)) {
+        await _sendMessage(overrideText: attachment.encodeMessage());
+      } else {
+        _openChat(chat);
+        await _sendMessage(overrideText: attachment.encodeMessage());
+      }
+    } catch (error) {
+      _setError('Attachment could not be sent. $error');
+    } finally {
+      if (mounted && _busy) setState(() => _busy = false);
+    }
+  }
+
+  void _showAttachmentOptions() {
+    if (_busy || _page != 'chat') return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    showModalBottomSheet<void>(
+      context: context, backgroundColor: _surface,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.image_outlined, color: _teal),
+            title: const Text('Photo from gallery'),
+            onTap: () { Navigator.pop(sheetContext); _pickAndSendAttachment('image'); }),
+          ListTile(
+            leading: const Icon(Icons.photo_camera_outlined, color: _orange),
+            title: const Text('Take a photo'),
+            onTap: () { Navigator.pop(sheetContext); _pickAndSendAttachment('camera'); }),
+          ListTile(
+            leading: const Icon(Icons.videocam_outlined, color: _teal),
+            title: const Text('Video from gallery'),
+            onTap: () { Navigator.pop(sheetContext); _pickAndSendAttachment('video'); }),
+          ListTile(
+            leading: const Icon(Icons.insert_drive_file_outlined, color: _orange),
+            title: const Text('Document or other file'),
+            subtitle: const Text('PDF, Word, Excel and more · up to 12 MB'),
+            onTap: () { Navigator.pop(sheetContext); _pickAndSendAttachment('document'); }),
+          const SizedBox(height: 12),
+        ],
+      )),
+    );
+  }
+
+  Future<void> _openReceivedAttachment(PgAttachment attachment) async {
+    final chat = _selectedChat;
+    if (chat == null || chat.page != 'chat' ||
+        chat.sessionId == null || _token == null) return;
+    try {
+      setState(() { _busy = true; _error = null; });
+      final bytes = await pgDownloadDecrypted(
+        client: _http!, apiBase: _apiBase, token: _token!,
+        sessionId: chat.sessionId!, attachment: attachment);
+      if (!mounted || chat.cleared || !_chats.contains(chat)) return;
+      setState(() => _busy = false);
+      if (attachment.kind == 'image') {
+        await showDialog<void>(context: context,
+          builder: (ctx) => Dialog(
+            backgroundColor: _bg,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(ctx).height * 0.68,
+                  maxWidth: MediaQuery.sizeOf(ctx).width * 0.92),
+                child: Image.memory(bytes, fit: BoxFit.contain),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close image'),
+              ),
+            ]),
+          ),
+        );
+      } else {
+        final approved = await showDialog<bool>(context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Open attachment outside PG?'),
+            content: const Text('This may create a readable temporary file. '
+              'Other apps or the operating system can retain copies. '
+              'Do not open confidential files in this experimental build.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Open file')),
+            ],
+          ));
+        if (approved != true || !mounted || chat.cleared) return;
+        final directory = await getTemporaryDirectory();
+        final file = File('${directory.path}/pg_${DateTime.now().microsecondsSinceEpoch}_${pgSafeFilename(attachment.name)}');
+        await file.writeAsBytes(bytes, flush: true);
+        chat.temporaryDecryptedFiles.add(file);
+        await OpenFilex.open(file.path);
+      }
+    } catch (error) {
+      _setError('Cannot open attachment. $error');
+    } finally {
+      if (mounted && _busy) setState(() => _busy = false);
+    }
+  }
+
+  Widget _buildAttachmentBubble(PgAttachment attachment, bool mine) {
+    final icon = switch (attachment.kind) {
+      'image' => Icons.image_outlined,
+      'video' => Icons.video_file_outlined,
+      'audio' => Icons.audio_file_outlined,
+      _ => Icons.description_outlined,
+    };
+    return InkWell(
+      onTap: mine || _busy ? null : () => _openReceivedAttachment(attachment),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, color: _teal, size: 32),
+        const SizedBox(width: 10),
+        Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(attachment.name, maxLines: 2, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: _white, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 3),
+          Text(mine ? 'Sent · encrypted' : 'Tap to open · temporary',
+            style: const TextStyle(color: _muted, fontSize: 11)),
+        ])),
+      ]),
+    );
+  }
+
   void _togglePicker(String mode) {
     FocusManager.instance.primaryFocus?.unfocus();
     if (!mounted || _page != 'chat') return;
     setState(() => _pickerMode = _pickerMode == mode ? 'none' : mode);
   }
 
-  void _appendEmoji(String glyph) {
-    if (_page != 'chat') return;
-    final input = _messageInput;
-    final old = input.value;
-    final selection = old.selection;
-    final start = selection.isValid ? selection.start : old.text.length;
-    final end = selection.isValid ? selection.end : old.text.length;
-    final updated = old.text.replaceRange(start, end, glyph);
-    if (updated.length > 2000) return;
-    input.value = TextEditingValue(
-      text: updated,
-      selection: TextSelection.collapsed(offset: start + glyph.length),
-    );
-    _selectedChat?.draft = updated;
-    setState(() => _pickerMode = 'none');
-  }
-
-  Widget _buildChatPicker() {
-    final isSticker = _pickerMode == 'sticker';
-    final choices = isSticker ? _pgStickerChoices : _pgEmojiChoices;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      constraints: const BoxConstraints(maxHeight: 162),
-      padding: const EdgeInsets.all(9),
-      decoration: BoxDecoration(
-        color: _surface,
-        border: Border.all(color: _stroke),
-        borderRadius: BorderRadius.circular(14),
+  Widget _buildChatPicker() => Container(
+    margin: const EdgeInsets.only(bottom: 8),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: _surface,
+      border: Border.all(color: _stroke),
+      borderRadius: BorderRadius.circular(18),
+    ),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      const Align(
+        alignment: Alignment.centerLeft,
+        child: Text('STICKERS', style: TextStyle(
+          color: _muted, fontSize: 11, letterSpacing: 1.2,
+          fontWeight: FontWeight.w800)),
       ),
-      child: SingleChildScrollView(
-        child: Wrap(spacing: 4, runSpacing: 4, children: [
-          for (final glyph in choices)
-            SizedBox(
-              width: isSticker ? 68 : 45,
-              height: isSticker ? 64 : 46,
-              child: IconButton(
-                tooltip: isSticker ? 'Send sticker $glyph' : 'Insert emoji $glyph',
-                padding: EdgeInsets.zero,
-                onPressed: _busy ? null : () {
-                  if (isSticker) {
-                    _sendMessage(overrideText: encodePgSticker(glyph));
-                  } else {
-                    _appendEmoji(glyph);
-                  }
-                },
-                icon: Text(glyph, style: TextStyle(
-                  fontSize: isSticker ? 39 : 29)),
-              ),
-            ),
+      const SizedBox(height: 8),
+      SizedBox(height: 116, child: SingleChildScrollView(
+        child: Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final glyph in _pgStickerChoices)
+            SizedBox(width: 62, height: 58, child: IconButton(
+              tooltip: 'Send sticker $glyph',
+              padding: EdgeInsets.zero,
+              onPressed: _busy ? null : () =>
+                  _sendMessage(overrideText: encodePgSticker(glyph)),
+              icon: Text(glyph, style: const TextStyle(fontSize: 38)),
+            )),
         ]),
-      ),
-    );
-  }
+      )),
+    ]),
+  );
 
   void _scrollDown() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1189,23 +1522,37 @@ class _PgHomeState extends State<PgHome> {
           )),
         ]),
         actions: [
-          if (_selectedChat != null && !_selectedChat!.cleared)
+          if (_selectedChat != null && !_selectedChat!.cleared && _page != 'chat')
             IconButton(
               tooltip: 'Rename conversation',
               onPressed: () => _renameChat(_selectedChat!),
               icon: const Icon(Icons.edit_outlined, color: _orange),
             ),
-          if (online && _page == 'chat')
+          if (online && _page == 'chat') ...[
+            IconButton(
+              tooltip: 'PG voice call (experimental)',
+              onPressed: () => _startCall(false),
+              icon: const Icon(Icons.call_outlined, color: _white),
+            ),
+            IconButton(
+              tooltip: 'PG video call (experimental)',
+              onPressed: () => _startCall(true),
+              icon: const Icon(Icons.videocam_outlined, color: _white),
+            ),
             PopupMenuButton<String>(
               tooltip: 'Conversation actions',
               icon: const Icon(Icons.more_vert_rounded, color: _white),
               color: _surface,
               onSelected: (value) {
+                if (value == 'rename' && _selectedChat != null) {
+                  _renameChat(_selectedChat!);
+                }
                 if (value == 'verify') _showSafetyCode();
                 if (value == 'end') _confirmEnd();
                 if (value == 'about') _showPrivacyNote();
               },
               itemBuilder: (ctx) => const [
+                PopupMenuItem(value: 'rename', child: Text('Rename conversation')),
                 PopupMenuItem(value: 'verify',
                   child: Text('Verify safety code')),
                 PopupMenuItem(value: 'end',
@@ -1213,7 +1560,8 @@ class _PgHomeState extends State<PgHome> {
                 PopupMenuItem(value: 'about',
                   child: Text('About this alpha')),
               ],
-            )
+            ),
+          ]
           else
             IconButton(
               tooltip: 'Privacy and build information',
@@ -1489,51 +1837,84 @@ class _PgHomeState extends State<PgHome> {
                       style: TextStyle(color: message.mine ? _orange : _teal,
                         letterSpacing: 0.9, fontWeight: FontWeight.w800, fontSize: 9)),
                     const SizedBox(height: 5),
-                    Text(
-                      decodePgSticker(message.text) ?? message.text,
-                      style: TextStyle(
-                        color: _white,
-                        fontSize: decodePgSticker(message.text) == null ? 14 : 43,
-                        height: 1.45,
+                    if (PgAttachment.fromMessage(message.text) != null)
+                      _buildAttachmentBubble(
+                        PgAttachment.fromMessage(message.text)!, message.mine)
+                    else if (message.text.startsWith(pgFilePrefix))
+                      const Text('Unsupported attachment', style: TextStyle(color: _muted))
+                    else
+                      Text(
+                        decodePgSticker(message.text) ?? message.text,
+                        style: TextStyle(
+                          color: _white,
+                          fontSize: decodePgSticker(message.text) == null ? 14 : 43,
+                          height: 1.45,
+                        ),
                       ),
-                    ),
                   ]),
                 ),
               );
             },
           )),
-      if (_pickerMode != 'none') _buildChatPicker(),
+      if (_pickerMode == 'sticker') _buildChatPicker(),
       Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
         IconButton(
-          tooltip: 'Emojis',
-          icon: const Icon(Icons.emoji_emotions_outlined, color: _orange),
-          onPressed: () => _togglePicker('emoji'),
+          tooltip: 'Attach photo, video or document',
+          icon: const Icon(Icons.add_circle_outline_rounded, color: _teal),
+          onPressed: _busy ? null : _showAttachmentOptions,
         ),
+        Expanded(child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(25),
+            color: _field,
+            border: Border.all(color: _stroke),
+          ),
+          child: Row(children: [
+            Expanded(child: TextField(
+              controller: _messageInput,
+              focusNode: _messageFocus,
+              minLines: 1, maxLines: 3, maxLength: 2000,
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                hintText: 'Message', counterText: '',
+                border: InputBorder.none, enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 11),
+              ),
+            )),
+            IconButton(
+              tooltip: 'Use the phone emoji keyboard',
+              icon: const Icon(Icons.emoji_emotions_outlined, color: _muted),
+              onPressed: () {
+                if (_pickerMode != 'none') {
+                  setState(() => _pickerMode = 'none');
+                }
+                _messageFocus.requestFocus();
+              },
+            ),
+          ]),
+        )),
         IconButton(
-          tooltip: 'Stickers',
-          icon: const Icon(Icons.auto_awesome_outlined, color: _teal),
+          tooltip: 'Open sticker tray',
+          icon: const Icon(Icons.sticky_note_2_outlined, color: _teal),
           onPressed: () => _togglePicker('sticker'),
         ),
-        Expanded(child: TextField(
-          controller: _messageInput,
-          minLines: 1, maxLines: 2, maxLength: 2000,
-          keyboardType: TextInputType.multiline,
-          textInputAction: TextInputAction.newline,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            hintText: 'Write a message…', counterText: '',
-            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          ),
-        )),
-        const SizedBox(width: 9),
-        SizedBox(width: 50, height: 50, child: IconButton.filled(
+        IconButton(
+          tooltip: 'Take photo',
+          icon: const Icon(Icons.camera_alt_outlined, color: _muted),
+          onPressed: _busy ? null : () => _pickAndSendAttachment('camera'),
+        ),
+        SizedBox(width: 46, height: 48, child: IconButton.filled(
           tooltip: 'Send message',
           onPressed: _busy ? null : () => _sendMessage(),
           style: IconButton.styleFrom(
             backgroundColor: _orange, foregroundColor: _bg,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+            shape: const CircleBorder(),
           ),
-          icon: const Icon(Icons.send_rounded, size: 22),
+          icon: const Icon(Icons.send_rounded, size: 20),
         )),
       ]),
 

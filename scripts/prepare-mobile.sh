@@ -108,6 +108,42 @@ void main() {
 }
 PG_TEST
 
+# Add only the permissions needed for camera/photos and experimental calls.
+# flutter create may recreate these files, so patch the generated platform apps.
+python3 - <<'PY'
+from pathlib import Path
+manifest = Path('android/app/src/main/AndroidManifest.xml')
+xml = manifest.read_text()
+permissions = [
+    ('android.permission.CAMERA','<uses-permission android:name="android.permission.CAMERA"/>'),
+    ('android.permission.RECORD_AUDIO','<uses-permission android:name="android.permission.RECORD_AUDIO"/>'),
+    ('android.permission.MODIFY_AUDIO_SETTINGS','<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>'),
+    ('android.permission.ACCESS_NETWORK_STATE','<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>'),
+    ('android.permission.CHANGE_NETWORK_STATE','<uses-permission android:name="android.permission.CHANGE_NETWORK_STATE"/>'),
+]
+for name, tag in permissions:
+    if name not in xml:
+        xml = xml.replace('<application', tag + '\n    <application', 1)
+if 'android.hardware.camera' not in xml:
+    xml = xml.replace('<application',
+      '<uses-feature android:name="android.hardware.camera" android:required="false"/>\n    <application', 1)
+manifest.write_text(xml)
+
+ios_plist = Path('ios/Runner/Info.plist')
+if ios_plist.exists():
+    plist = ios_plist.read_text()
+    usage = {
+        'NSCameraUsageDescription':'PG uses the camera only when you take a photo or start a video call.',
+        'NSMicrophoneUsageDescription':'PG uses the microphone only during an accepted voice or video call.',
+        'NSPhotoLibraryUsageDescription':'PG accesses photos that you explicitly choose to share.',
+    }
+    for key, value in usage.items():
+        if '<key>' + key + '</key>' not in plist:
+            plist = plist.replace('</dict>',
+                '    <key>' + key + '</key>\n    <string>' + value + '</string>\n</dict>', 1)
+    ios_plist.write_text(plist)
+PY
+
 # Debug-only cleartext HTTP permission for a local/LAN lab.
 # DO NOT enable cleartext in release; use HTTPS and audited E2EE for real users.
 mkdir -p android/app/src/debug
