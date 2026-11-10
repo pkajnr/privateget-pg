@@ -13,6 +13,10 @@ const INVITE_MS = 10 * 60 * 1000;
 const MAX_SESSION_MS = 24 * 60 * 60 * 1000;
 const IDLE_MS = 30 * 60 * 1000;
 const DELIVERY_MS = 3 * 60 * 1000;
+const ATTACHMENT_MS = 10 * 60 * 1000;
+const MAX_CIPHERTEXT_BYTES = 12 * 1024 * 1024;
+const MAX_SESSION_ATTACHMENTS = 4;
+const CALL_SIGNAL_MS = 90 * 1000;
 const devices = new Map(); // secret bearer -> {id, createdAt}
 const invites = new Map(); // hashed invitation code -> invitation metadata
 const sessions = new Map(); // id -> session; ciphertext is only queued in volatile memory
@@ -46,6 +50,20 @@ function json(req, max = 16000) {
     req.on('error', reject);
   });
 }
+function readCiphertext(req, limit = MAX_CIPHERTEXT_BYTES) {
+  return new Promise((resolve, reject) => {
+    const declared = Number(req.headers['content-length'] || 0);
+    if (declared > limit) return reject(Object.assign(new Error('Encrypted attachment too large'), { status: 413 }));
+    const blocks = []; let total = 0;
+    req.on('data', block => {
+      total += block.length;
+      if (total > limit) { reject(Object.assign(new Error('Encrypted attachment too large'), { status: 413 })); req.destroy(); return; }
+      blocks.push(block);
+    });
+    req.on('end', () => resolve(Buffer.concat(blocks)));
+    req.on('error', reject);
+  });
+}
 function device(req) {
   const head = req.headers.authorization || '';
   const match = /^Bearer ([A-Za-z0-9_-]{20,})$/.exec(head);
@@ -59,6 +77,7 @@ function checkRate(key, limit = 80) {
 function endSession(s, reason = 'ended') {
   s.state = 'ended'; s.reason = reason; s.endedAt = now();
   s.queue = []; s.aKey = null; s.bKey = null; // drop relay public keys and ciphertext
+  s.callSignals = []; s.attachments.clear(); // drop all ephemeral call and media data
 }
 function sweep() {
   const t = now();
@@ -69,6 +88,8 @@ function sweep() {
   for (const [id, s] of sessions) {
     if (s.state !== 'ended' && (s.createdAt + MAX_SESSION_MS < t || s.lastActivity + IDLE_MS < t)) endSession(s, 'expired');
     s.queue = s.queue.filter(m => m.at + DELIVERY_MS > t);
+    s.callSignals = s.callSignals.filter(m => m.at + CALL_SIGNAL_MS > t);
+    for (const [fileId, f] of s.attachments) if (f.expiresAt <= t) s.attachments.delete(fileId);
     if (s.state === 'ended' && s.endedAt + 120_000 < t) sessions.delete(id);
   }
   for (const [key, b] of rate) if (t - b.start > 120_000) rate.delete(key);
@@ -124,11 +145,48 @@ const server = http.createServer(async (req, res) => {
       if (invite.a === who.id) return fail(res, 400, 'Cannot accept your own invite');
       invite.state = 'accepted';
       const s = { id: randomUUID(), a: invite.a, b: who.id, aKey: invite.aKey,
-        bKey: b.publicKey, state: 'awaiting_approval', createdAt: now(), lastActivity: now(), queue: [], nextSeq: 0 };
+        bKey: b.publicKey, state: 'awaiting_approval', createdAt: now(), lastActivity: now(), queue: [], nextSeq: 0,
+        attachments: new Map(), callSignals: [] };
       sessions.set(s.id, s); invite.sessionId = s.id;
       return reply(res, 201, { sessionId: s.id, state: s.state });
     }
-    const matchSession = /^\/v1\/sessions\/([0-9a-f-]+)(?:\/(approve|messages|end))?$/.exec(url.pathname);
+    // Opaque binary attachment endpoint. The server is given ciphertext only:
+    // no file name, MIME type, AES key or plaintext is sent here.
+    const attachmentRoute = /^\/v1\/sessions\/([0-9a-f-]+)\/attachments(?:\/([0-9a-f-]+))?$/.exec(url.pathname);
+    if (attachmentRoute) {
+      const session = sessions.get(attachmentRoute[1]);
+      if (!session) return fail(res, 404, 'Session unavailable');
+      if (session.a !== who.id && session.b !== who.id) return fail(res, 403, 'Not a participant');
+      if (session.state !== 'active') return fail(res, 409, 'Session not active');
+      if (req.method === 'POST' && !attachmentRoute[2]) {
+        if (session.attachments.size >= MAX_SESSION_ATTACHMENTS) return fail(res, 429, 'Temporary attachment quota reached');
+        if (req.headers['content-type']?.split(';')[0] !== 'application/octet-stream') {
+          return fail(res, 415, 'Ciphertext body required');
+        }
+        const blob = await readCiphertext(req);
+        if (blob.length < 17) return fail(res, 400, 'Encrypted attachment too small');
+        const attachmentId = randomUUID();
+        session.attachments.set(attachmentId, {
+          bytes: blob, from: who.id, expiresAt: now() + ATTACHMENT_MS,
+        });
+        session.lastActivity = now();
+        return reply(res, 201, { id: attachmentId, expiresInSeconds: ATTACHMENT_MS / 1000 });
+      }
+      if (req.method === 'GET' && attachmentRoute[2]) {
+        const blob = session.attachments.get(attachmentRoute[2]);
+        if (!blob || blob.expiresAt < now()) return fail(res, 404, 'Attachment expired');
+        if (blob.from === who.id) return fail(res, 403, 'Recipient only');
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': blob.bytes.length,
+          'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'no-referrer',
+        });
+        return res.end(blob.bytes);
+      }
+      return fail(res, 405, 'Method not allowed');
+    }
+    const matchSession = /^\/v1\/sessions\/([0-9a-f-]+)(?:\/(approve|messages|end|call))?$/.exec(url.pathname);
     if (!matchSession) return fail(res, 404, 'Route not found');
     const s = sessions.get(matchSession[1]);
     if (!s) return fail(res, 404, 'Session not found or already destroyed');
@@ -144,6 +202,28 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && action === 'end') {
       if (s.state !== 'ended') endSession(s);
       return reply(res, 200, { state: 'ended' });
+    }
+    if (action === 'call') {
+      if (s.state !== 'active') return fail(res, 409, 'Session not active');
+      if (req.method === 'GET') {
+        const mine = s.callSignals.filter(m => m.to === who.id);
+        s.callSignals = s.callSignals.filter(m => m.to !== who.id);
+        return reply(res, 200, { signals: mine.map(({callId,type,data}) => ({callId,type,data})) });
+      }
+      if (req.method === 'POST') {
+        const b = await json(req, 100000);
+        const allowed = new Set(['offer','answer','ice','end','decline']);
+        if (typeof b.callId !== 'string' || !/^[a-zA-Z0-9-]{16,64}$/.test(b.callId) ||
+            !allowed.has(b.type) || !b.data || typeof b.data !== 'object' ||
+            Array.isArray(b.data)) return fail(res, 400, 'Invalid call signal');
+        if (s.callSignals.length >= 160) return fail(res, 429, 'Call signal queue full');
+        s.callSignals.push({
+          to: who.id === s.a ? s.b : s.a,
+          callId: b.callId, type: b.type, data: b.data, at: now(),
+        });
+        return reply(res, 201, { queued: true });
+      }
+      return fail(res, 405, 'Method not allowed');
     }
     if (action === 'messages') {
       if (s.state !== 'active') return fail(res, 409, 'Session not active');
