@@ -1489,14 +1489,31 @@ class _PgHomeState extends State<PgHome> {
                       style: TextStyle(color: message.mine ? _orange : _teal,
                         letterSpacing: 0.9, fontWeight: FontWeight.w800, fontSize: 9)),
                     const SizedBox(height: 5),
-                    Text(message.text, style: const TextStyle(
-                      color: _white, fontSize: 14, height: 1.45)),
+                    Text(
+                      decodePgSticker(message.text) ?? message.text,
+                      style: TextStyle(
+                        color: _white,
+                        fontSize: decodePgSticker(message.text) == null ? 14 : 43,
+                        height: 1.45,
+                      ),
+                    ),
                   ]),
                 ),
               );
             },
           )),
+      if (_pickerMode != 'none') _buildChatPicker(),
       Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+        IconButton(
+          tooltip: 'Emojis',
+          icon: const Icon(Icons.emoji_emotions_outlined, color: _orange),
+          onPressed: () => _togglePicker('emoji'),
+        ),
+        IconButton(
+          tooltip: 'Stickers',
+          icon: const Icon(Icons.auto_awesome_outlined, color: _teal),
+          onPressed: () => _togglePicker('sticker'),
+        ),
         Expanded(child: TextField(
           controller: _messageInput,
           minLines: 1, maxLines: 2, maxLength: 2000,
@@ -1511,7 +1528,7 @@ class _PgHomeState extends State<PgHome> {
         const SizedBox(width: 9),
         SizedBox(width: 50, height: 50, child: IconButton.filled(
           tooltip: 'Send message',
-          onPressed: _busy ? null : _sendMessage,
+          onPressed: _busy ? null : () => _sendMessage(),
           style: IconButton.styleFrom(
             backgroundColor: _orange, foregroundColor: _bg,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
