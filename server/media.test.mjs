@@ -2,14 +2,17 @@
 // No actual audio/video or Flutter runtime is involved.
 import { spawn } from 'node:child_process';
 import { strict as assert } from 'node:assert';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHmac } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const port = 18789;
+const turnSecret = 'pg-integration-only-not-a-real-secret-0123456789';
+const turnUrl = 'turn:relay.example.invalid:3478?transport=udp';
 const root = 'http://127.0.0.1:' + port;
 const proc = spawn(process.execPath, ['server.mjs'], {
   cwd: new URL('.', import.meta.url),
-  env: { ...process.env, PG_HOST: '127.0.0.1', PG_PORT: String(port) },
+  env: { ...process.env, PG_HOST: '127.0.0.1', PG_PORT: String(port),
+    PG_TURN_SECRET: turnSecret, PG_TURN_URLS: turnUrl },
   stdio: 'ignore',
 });
 const json = async (method, path, token, value) => {
@@ -41,6 +44,23 @@ try {
   assert.equal(accepted.status, 201);
   const sid = accepted.sessionId;
   assert.equal((await json('POST', '/v1/sessions/' + sid + '/approve', a.token, {})).status, 200);
+
+  // ICE credentials are generated only for active session members.
+  const aliceIce = await json('GET', '/v1/sessions/' + sid + '/ice', a.token);
+  assert.equal(aliceIce.status, 200);
+  assert.equal(aliceIce.turnConfigured, true);
+  assert.equal(aliceIce.iceServers.length, 2);
+  assert.deepEqual(aliceIce.iceServers[1].urls, [turnUrl]);
+  const turn = aliceIce.iceServers[1];
+  assert.ok(turn.username.includes(':'));
+  assert.ok(aliceIce.expiresAt > Math.floor(Date.now() / 1000));
+  assert.equal(
+    turn.credential,
+    createHmac('sha1', turnSecret).update(turn.username).digest('base64')
+  );
+  assert.equal(
+    (await json('GET', '/v1/sessions/' + sid + '/ice', outsider.token)).status, 403
+  );
 
   // Ciphertext is opaque to relay; contents include a fake AEAD tag.
   const ciphertext = randomBytes(128);
@@ -79,6 +99,7 @@ try {
     { headers: { Authorization: 'Bearer ' + b.token } });
   assert.equal(afterEnd.status, 409);
   assert.equal((await json('GET', '/v1/sessions/' + sid + '/call', b.token)).status, 409);
+  assert.equal((await json('GET', '/v1/sessions/' + sid + '/ice', b.token)).status, 409);
   console.log('PASS PG attachment and call relay integration tests');
 } finally {
   proc.kill();

@@ -8,10 +8,13 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 typedef PgSendCallSignal = Future<void> Function(
   String sessionId, String callId, String type, Map<String, dynamic> data);
+typedef PgGetIceServers = Future<List<Map<String, dynamic>>> Function(
+  String sessionId);
 
 class PgCallService extends ChangeNotifier {
-  PgCallService(this.send);
+  PgCallService(this.send, this.getIceServers);
   final PgSendCallSignal send;
+  final PgGetIceServers getIceServers;
   final RTCVideoRenderer localVideo = RTCVideoRenderer();
   final RTCVideoRenderer remoteVideo = RTCVideoRenderer();
 
@@ -47,13 +50,11 @@ class PgCallService extends ChangeNotifier {
     connecting = true;
     notifyListeners();
     await _ensureRenderers();
-    // STUN is for alpha connectivity, and may expose public IP addresses
-    // to the STUN service. Production requires an audited, trusted TURN relay.
-    _peer = await createPeerConnection({
-      'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'},
-      ],
-    });
+    // PG backend can supply short-lived coturn REST credentials only to
+    // active-session participants. The permanent TURN secret never ships
+    // in the APK. A missing TURN deployment falls back to public STUN.
+    final iceServers = await getIceServers(sid);
+    _peer = await createPeerConnection({'iceServers': iceServers});
     _peer!.onIceCandidate = (candidate) {
       final id = callId, current = sessionId;
       if (id == null || current == null || candidate.candidate == null) return;
