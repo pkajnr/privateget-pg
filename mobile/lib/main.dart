@@ -393,6 +393,7 @@ class _PgHomeState extends State<PgHome> {
   String? _error;
   bool _ending = false;
   String _pickerMode = 'none'; // none or sticker
+  PgMessage? _replyTarget;
 
   @override
   void initState() {
@@ -498,6 +499,7 @@ class _PgHomeState extends State<PgHome> {
     }
     setState(() {
       _pickerMode = 'none';
+      _replyTarget = null;
       if (chat != null && add) _chats.add(chat);
       _selectedChat = chat;
       if (chat != null) chat.markRead();
@@ -719,6 +721,14 @@ class _PgHomeState extends State<PgHome> {
         chat?.page != 'chat') return;
     final text = overrideText ?? _messageInput.text.trim();
     if (text.isEmpty || text.length > 2000) return;
+    final reply = overrideText == null ? _replyTarget : null;
+    final quoted = reply == null ? null : _replyPreview(reply);
+    final wire = reply == null
+        ? text : encodePgReply(text, quoted!, reply.mine);
+    if (wire.length > 2000) {
+      _setError('Reply is too long. Shorten the message.');
+      return;
+    }
     final id = chat!.sessionId!;
     final key = chat.sendKey!;
     final role = chat.role!;
@@ -726,7 +736,7 @@ class _PgHomeState extends State<PgHome> {
     try {
       final rand = Random.secure();
       final nonce = List<int>.generate(12, (_) => rand.nextInt(256));
-      final box = await _cipher.encrypt(utf8.encode(text),
+      final box = await _cipher.encrypt(utf8.encode(wire),
           secretKey: key, nonce: nonce,
           aad: utf8.encode('PG|$id|$role'));
       await _request('POST', '/v1/sessions/$id/messages', {
@@ -736,8 +746,10 @@ class _PgHomeState extends State<PgHome> {
       });
       if (!mounted || chat.cleared || !_chats.contains(chat)) return;
       setState(() {
-        chat.messages.add(PgMessage(text, true));
+        chat.messages.add(PgMessage(
+          text, true, quotedText: quoted, quotedMine: reply?.mine));
         if (identical(_selectedChat, chat)) {
+          if (reply != null) _replyTarget = null;
           if (overrideText == null) {
             _messageInput.clear();
             chat.draft = '';
@@ -771,7 +783,7 @@ class _PgHomeState extends State<PgHome> {
             mac: Mac(_bytes(m['mac'] as String)));
         final clear = await _cipher.decrypt(box,
             secretKey: key, aad: utf8.encode('PG|$id|$opposite'));
-        newItems.add(PgMessage(utf8.decode(clear), false));
+        newItems.add(PgMessage.fromWire(utf8.decode(clear), false));
       } catch (_) {
         newItems.add(PgMessage('Message authentication failed', false));
       }
@@ -809,6 +821,7 @@ class _PgHomeState extends State<PgHome> {
     if (_calls.sessionId == chat.sessionId && _calls.callId != null) {
       unawaited(_calls.close(sendEnd: false));
     }
+    if (identical(_selectedChat, chat)) _replyTarget = null;
     chat.clearSensitive();
     chat.page = 'ended';
     if (mounted) {
@@ -1199,6 +1212,95 @@ class _PgHomeState extends State<PgHome> {
       ]),
     );
   }
+
+  String _replyPreview(PgMessage message) {
+    final attachment = PgAttachment.fromMessage(message.text);
+    if (attachment != null) return 'Attachment: ${attachment.name}';
+    final status = decodePgStatus(message.text);
+    if (status != null) return status.label;
+    final sticker = decodePgSticker(message.text);
+    if (sticker != null) return 'Sticker $sticker';
+    final normal = message.text.replaceAll(RegExp(r'\\s+'), ' ').trim();
+    return normal.length > 150 ? '${normal.substring(0, 149)}…' : normal;
+  }
+
+  void _replyTo(PgMessage message) {
+    final chat = _selectedChat;
+    if (chat == null || chat.cleared || chat.page != 'chat' ||
+        !chat.messages.contains(message)) return;
+    setState(() {
+      _pickerMode = 'none';
+      _replyTarget = message;
+    });
+    _messageFocus.requestFocus();
+  }
+
+  Widget _replyPreviewBar() {
+    final target = _replyTarget;
+    if (target == null) return const SizedBox.shrink();
+    return Container(
+      key: const ValueKey('pg-reply-preview'),
+      margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: _surface,
+        border: Border(left: BorderSide(color: _teal, width: 3)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(children: [
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(target.mine ? 'Replying to yourself' : 'Replying to contact',
+              style: const TextStyle(fontSize: 11, color: _teal,
+                fontWeight: FontWeight.w800)),
+            const SizedBox(height: 3),
+            Text(_replyPreview(target),
+              maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: _white, fontSize: 12)),
+          ],
+        )),
+        IconButton(
+          tooltip: 'Cancel reply',
+          onPressed: () => setState(() => _replyTarget = null),
+          icon: const Icon(Icons.close_rounded, color: _muted),
+        ),
+      ]),
+    );
+  }
+
+  Widget _pgStatusArtwork(PgStatusIcon status, {double size = 58}) {
+    return Container(
+      width: size, height: size,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D2530),
+        borderRadius: BorderRadius.circular(size * .28),
+        border: Border.all(color: status.color.withValues(alpha: 0.5), width: 2),
+        boxShadow: [BoxShadow(
+          color: status.color.withValues(alpha: 0.17),
+          blurRadius: 12, spreadRadius: 1)],
+      ),
+      child: Stack(alignment: Alignment.center, children: [
+        Icon(status.icon, size: size * .52, color: status.color),
+        Positioned(right: size * .1, bottom: size * .08,
+          child: Container(
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle, color: Color(0xFF133D37)),
+            child: Icon(Icons.check_rounded,
+              size: size * .20, color: const Color(0xFFFFB238)),
+          )),
+      ]),
+    );
+  }
+
+  Widget _pgStatusMessage(PgStatusIcon status) =>
+    Column(mainAxisSize: MainAxisSize.min, children: [
+      _pgStatusArtwork(status, size: 76),
+      const SizedBox(height: 6),
+      Text(status.label,
+        style: const TextStyle(color: _white, fontSize: 12,
+          fontWeight: FontWeight.w800)),
+    ]);
 
   void _togglePicker(String mode) {
     FocusManager.instance.primaryFocus?.unfocus();
