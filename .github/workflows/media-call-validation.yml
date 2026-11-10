@@ -1,5 +1,8 @@
 name: Verify PG media and calling branch
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - feature/pg-attachments-calls-ui-20261110
