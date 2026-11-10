@@ -17,7 +17,7 @@ fi
 # Flutter creates its sample counter-app test when a project has no test file.
 # That sample imports flutter_test and refers to MyApp, which is not our app.
 # Generate native platform scaffolding, then deliberately replace the test.
-flutter create --project-name privateget_pg --org com.privateget --platforms android,ios .
+flutter create --project-name privateget_pg --org com.privateget --platforms android,ios --no-pub .
 
 # Make this safe even if GitHub still contains the original v0.2 pubspec.yaml.
 # Flutter's testing library is provided by the Flutter SDK, not pub.dev.
@@ -161,6 +161,16 @@ cat > android/app/src/debug/AndroidManifest.xml <<'MANIFEST'
   <application android:usesCleartextTraffic="true" tools:replace="android:usesCleartextTraffic"/>
 </manifest>
 MANIFEST
+
+# Render committed PG brand vector as platform launcher PNGs.
+# Use a local isolated Python environment only when CairoSVG is unavailable.
+if python3 -c 'import cairosvg' >/dev/null 2>&1; then
+  python3 branding/render_launcher.py
+else
+  python3 -m venv .pg-icon-venv
+  .pg-icon-venv/bin/python -m pip install --disable-pip-version-check --quiet 'cairosvg==2.8.2'
+  .pg-icon-venv/bin/python branding/render_launcher.py
+fi
 
 flutter pub get
 printf '\nChecking PG Flutter tests...\n'
