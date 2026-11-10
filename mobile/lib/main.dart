@@ -928,7 +928,7 @@ class _PgHomeState extends State<PgHome> {
         path = selected.path;
         filename = selected.name;
       }
-      if (path == null || filename == null || !mounted ||
+      if (path == null || !mounted ||
           !_chats.contains(chat) || chat.cleared) return;
       final file = File(path);
       final fileLength = await file.length();
