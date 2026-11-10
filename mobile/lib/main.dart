@@ -6,6 +6,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
+import 'pg_media.dart';
+import 'pg_calls.dart';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
@@ -74,10 +82,6 @@ String buildInvitationShareText(String code) =>
     'Please do not forward it to anyone else.';
 
 // These large emoji stickers travel inside PG's existing encrypted text channel.
-const _pgEmojiChoices = <String>[
-  '😀','😂','🥰','😍','😊','😎','😢','😮','❤️','💕','👍','🙏',
-  '👏','🔥','🎉','✅','👋','💯','💪','✨','🤗','🤔','🥳','😴',
-];
 const _pgStickerChoices = <String>[
   '🥳','❤️','😂','😍','🔥','👏','💯','🤗','🙏','🎉','💪','👋',
 ];
@@ -114,6 +118,7 @@ class PgConversation {
   SimplePublicKey? publicKey;
   SecretKey? sendKey, receiveKey;
   final List<PgMessage> messages = <PgMessage>[];
+  final List<File> temporaryDecryptedFiles = <File>[];
   String draft = '';
   bool cleared = false;
   String? nickname;
@@ -171,6 +176,11 @@ class PgConversation {
     sendKey = null;
     receiveKey = null;
     messages.clear();
+    // Best-effort OS-cache cleanup; external viewers may copy the file.
+    for (final file in temporaryDecryptedFiles) {
+      unawaited(file.delete().catchError((Object _) => file));
+    }
+    temporaryDecryptedFiles.clear();
     draft = '';
     nickname = null;
     unreadCount = 0;
@@ -258,6 +268,8 @@ class PgHome extends StatefulWidget {
 class _PgHomeState extends State<PgHome> {
   final _inviteInput = TextEditingController();
   final _messageInput = TextEditingController();
+  final _messageFocus = FocusNode();
+  final _imagePicker = ImagePicker();
   final _scroll = ScrollController();
   final _keyExchange = X25519();
   final _chats = <PgConversation>[];
@@ -302,6 +314,7 @@ class _PgHomeState extends State<PgHome> {
     _http?.close(force: true);
     _inviteInput.dispose();
     _messageInput.dispose();
+    _messageFocus.dispose();
     _scroll.dispose();
     for (final chat in _chats) {
       chat.clearSensitive();
