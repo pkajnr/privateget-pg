@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#142841"/>
+      <stop offset="0.56" stop-color="#091425"/>
+      <stop offset="1" stop-color="#06111D"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFE6A0"/>
+      <stop offset="0.28" stop-color="#FFB133"/>
+      <stop offset="0.67" stop-color="#E47815"/>
+      <stop offset="1" stop-color="#B15A18"/>
+    </linearGradient>
+    <linearGradient id="teal" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8DFFE7"/>
+      <stop offset="1" stop-color="#16BE9E"/>
+    </linearGradient>
+    <radialGradient id="halo">
+      <stop offset="0" stop-color="#16CBA9" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#16CBA9" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <rect x="18" y="18" width="988" height="988" rx="214"
+        fill="none" stroke="#29516A" stroke-width="14" opacity=".65"/>
+  <circle cx="512" cy="504" r="442" fill="url(#halo)"/>
+  <!-- The asymmetric, open shield doubles as a private conversation glyph. -->
+  <path d="M512 130 C646 217 762 226 811 257 L811 494
+       C811 665 694 814 512 886 C330 814 213 665 213 494
+       L213 257 C262 226 378 217 512 130 Z"
+       fill="#081728" stroke="url(#shield)" stroke-width="49"
+       stroke-linejoin="round"/>
+  <path d="M512 177 C623 246 729 259 766 279 L766 492
+       C766 632 676 746 512 823 C348 746 258 632 258 492
+       L258 279 C295 259 401 246 512 177 Z"
+       fill="none" stroke="#FFCC60" stroke-width="6" opacity=".33"/>
+  <!-- Rounded connected letterforms for a compact, original PG monogram. -->
+  <g font-family="DejaVu Sans, sans-serif" font-size="298"
+     font-weight="900" letter-spacing="-29" text-anchor="middle">
+    <text x="506" y="615" fill="#0D1D2B" stroke="#0D1D2B" stroke-width="18">PG</text>
+    <text x="506" y="603" fill="#F8F8F2">PG</text>
+  </g>
+  <path d="M609 684 Q672 684 705 648"
+        stroke="url(#teal)" stroke-width="28" stroke-linecap="round" fill="none"/>
+  <circle cx="701" cy="648" r="24" fill="#54E8C7"/>
+  <circle cx="345" cy="355" r="14" fill="#FFCD67"/>
+  <path d="M344 722 L384 750" stroke="#54E8C7"
+        stroke-width="16" stroke-linecap="round"/>
+</svg>

@@ -39,7 +39,7 @@ class PgApp extends StatelessWidget {
   const PgApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'PrivateGet · PG',
+    title: 'PG',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
@@ -1047,69 +1047,136 @@ class _PgHomeState extends State<PgHome> {
     _showingCallPanel = true;
     try {
       await showDialog<void>(
-        context: context, barrierDismissible: false,
+        context: context,
+        barrierDismissible: false,
         builder: (dialogContext) => PopScope<void>(
           canPop: false,
-          child: Dialog(
+          child: Dialog.fullscreen(
             backgroundColor: _bg,
-            insetPadding: const EdgeInsets.symmetric(horizontal: 12),
-            child: AnimatedBuilder(
-              animation: _calls,
-              builder: (ctx, _) => Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(_calls.video ? Icons.videocam_rounded : Icons.call_rounded,
-                    size: 32, color: _teal),
-                  const SizedBox(height: 10),
-                  Text(_calls.callId == null ? 'Call ended'
-                      : _calls.active ? 'PG call connected' : 'Connecting PG call…',
-                    style: const TextStyle(color: _white, fontSize: 19,
-                      fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  const Text('EXPERIMENTAL · NOT SECURITY AUDITED',
-                    style: TextStyle(color: _danger, fontSize: 10)),
-                  const SizedBox(height: 16),
+            child: SafeArea(
+              child: AnimatedBuilder(
+                animation: _calls,
+                builder: (ctx, _) => Stack(children: [
+                  // Remote video occupies the entire available display.
+                  // Contain, never Cover, so no part of the incoming frame is
+                  // cut off on devices with unusual screen aspect ratios.
                   if (_calls.video && _calls.callId != null)
-                    SizedBox(height: 270, child: Stack(children: [
-                      Positioned.fill(child: RTCVideoView(
+                    Positioned.fill(child: ColoredBox(
+                      color: Colors.black,
+                      child: RTCVideoView(
                         _calls.remoteVideo,
-                        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)),
-                      Positioned(right: 8, bottom: 8, width: 100, height: 125,
-                        child: RTCVideoView(_calls.localVideo, mirror: true)),
-                    ]))
+                        objectFit:
+                          RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+                        mirror: false,
+                      ),
+                    ))
                   else
-                    const SizedBox(height: 110, child: Center(
+                    const Positioned.fill(child: Center(
                       child: Icon(Icons.record_voice_over_rounded,
-                        size: 76, color: _muted))),
-                  const SizedBox(height: 15),
-                  if (_calls.callId != null)
-                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      IconButton.filledTonal(
-                        tooltip: _calls.muted ? 'Unmute' : 'Mute',
-                        onPressed: _calls.toggleMute,
-                        icon: Icon(_calls.muted ? Icons.mic_off_rounded : Icons.mic_rounded)),
-                      if (_calls.video) ...[
-                        const SizedBox(width: 10),
-                        IconButton.filledTonal(
-                          tooltip: 'Toggle camera',
-                          onPressed: _calls.toggleCamera,
-                          icon: const Icon(Icons.videocam_off_outlined)),
+                        size: 100, color: _muted),
+                    )),
+                  // Keep call information readable, without overlaying most
+                  // of the picture with a small dialog or fixed-height panel.
+                  Positioned(
+                    left: 16, top: 12,
+                    right: _calls.video ? 145 : 16,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_calls.callId == null ? 'Call ended'
+                          : _calls.active ? 'PG call connected'
+                          : 'Connecting PG call…',
+                          style: const TextStyle(
+                            color: _white, fontSize: 19,
+                            fontWeight: FontWeight.w800,
+                            shadows: [Shadow(
+                              color: Colors.black87, blurRadius: 8)])),
+                        const SizedBox(height: 4),
+                        const Text('EXPERIMENTAL · NOT SECURITY AUDITED',
+                          style: TextStyle(color: _danger, fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            shadows: [Shadow(
+                              color: Colors.black, blurRadius: 6)])),
+                        if (_calls.video && _calls.callId != null &&
+                            !_calls.remoteVideoReady) ...[
+                          const SizedBox(height: 8),
+                          const Text('Waiting for incoming video…',
+                            style: TextStyle(color: _white, fontSize: 12,
+                              shadows: [Shadow(
+                                color: Colors.black, blurRadius: 6)])),
+                        ],
                       ],
-                      const SizedBox(width: 16),
-                      IconButton.filled(
-                        tooltip: 'Hang up',
-                        style: IconButton.styleFrom(backgroundColor: _danger),
-                        onPressed: () async {
-                          await _calls.close();
-                          if (dialogContext.mounted) Navigator.pop(dialogContext);
-                        },
-                        icon: const Icon(Icons.call_end_rounded, color: _bg)),
-                    ])
-                  else
-                    FilledButton(
-                      onPressed: () => Navigator.pop(dialogContext),
-                      child: const Text('Close'),
                     ),
+                  ),
+                  if (_calls.video && _calls.callId != null)
+                    Positioned(
+                      right: 14, top: 12,
+                      width: 118, height: 164,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(15),
+                        child: ColoredBox(
+                          color: _surface,
+                          child: RTCVideoView(
+                            _calls.localVideo,
+                            mirror: true,
+                            objectFit: RTCVideoViewObjectFit
+                                .RTCVideoViewObjectFitCover,
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Controls stay at the bottom without shrinking the remote
+                  // image. Leave room for the navigation bar and notches.
+                  Positioned(
+                    bottom: 18, left: 12, right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: _surface.withValues(alpha: 0.94),
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      child: _calls.callId != null
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              IconButton.filledTonal(
+                                tooltip: _calls.muted ? 'Unmute' : 'Mute',
+                                onPressed: _calls.toggleMute,
+                                icon: Icon(_calls.muted
+                                  ? Icons.mic_off_rounded : Icons.mic_rounded),
+                              ),
+                              if (_calls.video) ...[
+                                const SizedBox(width: 16),
+                                IconButton.filledTonal(
+                                  tooltip: 'Toggle camera',
+                                  onPressed: _calls.toggleCamera,
+                                  icon: const Icon(
+                                    Icons.videocam_off_outlined),
+                                ),
+                              ],
+                              const SizedBox(width: 24),
+                              IconButton.filled(
+                                tooltip: 'Hang up',
+                                style: IconButton.styleFrom(
+                                  backgroundColor: _danger),
+                                onPressed: () async {
+                                  await _calls.close();
+                                  if (dialogContext.mounted) {
+                                    Navigator.pop(dialogContext);
+                                  }
+                                },
+                                icon: const Icon(
+                                  Icons.call_end_rounded, color: _bg),
+                              ),
+                            ],
+                          )
+                        : FilledButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text('Close call'),
+                          ),
+                    ),
+                  ),
                 ]),
               ),
             ),
@@ -1934,16 +2001,13 @@ class _PgHomeState extends State<PgHome> {
           icon: const Icon(Icons.arrow_back_rounded, color: _white),
         ),
         title: Row(children: [
-          Container(
-            width: 34, height: 34,
-            decoration: BoxDecoration(
-              color: _orange.withValues(alpha: 0.13),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: const Icon(Icons.shield_outlined, color: _orange, size: 21),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.asset('assets/pg_brandmark.png',
+              width: 38, height: 38, fit: BoxFit.cover),
           ),
           const SizedBox(width: 9),
-          const Flexible(child: Text('PrivateGet',
+          const Flexible(child: Text('PG',
             maxLines: 1, overflow: TextOverflow.ellipsis,
             style: TextStyle(color: _white,
               fontWeight: FontWeight.w800, fontSize: 19))),
@@ -2059,7 +2123,7 @@ class _PgHomeState extends State<PgHome> {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         _iconTile(Icons.cloud_off_outlined, color: _orange),
         const SizedBox(height: 20),
-        const Text('Connecting to PrivateGet', style: TextStyle(
+        const Text('Connecting to PG', style: TextStyle(
           fontSize: 23, fontWeight: FontWeight.w800, color: _white)),
         const SizedBox(height: 11),
         const Text('The app needs a reachable PG server before you can invite contacts or chat.',
@@ -2273,20 +2337,10 @@ class _PgHomeState extends State<PgHome> {
                     ),
                   ),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(message.mine ? 'YOU' : 'CONTACT',
-                        style: TextStyle(color: message.mine ? _orange : _teal,
-                          letterSpacing: 0.9, fontWeight: FontWeight.w800,
-                          fontSize: 9)),
-                      const SizedBox(width: 16),
-                      InkWell(
-                        onTap: () => _replyTo(message),
-                        child: const Padding(
-                          padding: EdgeInsets.all(5),
-                          child: Icon(Icons.reply_rounded, color: _muted, size: 17),
-                        ),
-                      ),
-                    ]),
+                    Text(message.mine ? 'YOU' : 'CONTACT',
+                      style: TextStyle(color: message.mine ? _orange : _teal,
+                        letterSpacing: 0.9, fontWeight: FontWeight.w800,
+                        fontSize: 9)),
                     if (message.quotedText != null) ...[
                       const SizedBox(height: 7),
                       Container(
