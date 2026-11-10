@@ -2001,13 +2001,10 @@ class _PgHomeState extends State<PgHome> {
           icon: const Icon(Icons.arrow_back_rounded, color: _white),
         ),
         title: Row(children: [
-          Container(
-            width: 34, height: 34,
-            decoration: BoxDecoration(
-              color: _orange.withValues(alpha: 0.13),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: const Icon(Icons.shield_outlined, color: _orange, size: 21),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.asset('assets/pg_brandmark.png',
+              width: 38, height: 38, fit: BoxFit.cover),
           ),
           const SizedBox(width: 9),
           const Flexible(child: Text('PG',
