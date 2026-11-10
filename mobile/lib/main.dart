@@ -514,7 +514,15 @@ class _PgHomeState extends State<PgHome> {
 
   Future<Map<String, dynamic>> _request(String method, String path, [Map<String, dynamic>? body]) async {
     final uri = Uri.parse('$_apiBase$path');
-    final request = await _http!.openUrl(method, uri).timeout(const Duration(seconds: 7));
+    final HttpClientRequest request;
+    try {
+      request = await _http!.openUrl(method, uri)
+        .timeout(const Duration(seconds: 7));
+    } on SocketException {
+      throw ApiException(
+        'PG cannot resolve ${uri.host}. Open Server address and use '
+        'the exact HTTPS URL shown in your Render dashboard.');
+    }
     request.headers.set('Accept', 'application/json');
     request.headers.set('Cache-Control', 'no-store');
     if (_token != null) request.headers.set('Authorization', 'Bearer $_token');
@@ -1987,6 +1995,9 @@ class _PgHomeState extends State<PgHome> {
         const SizedBox(height: 22),
         _primaryAction('Try connecting again', _register, icon: Icons.refresh_rounded),
         const SizedBox(height: 12),
+        _secondaryAction('Change PG server address', _editServerAddress,
+          icon: Icons.settings_ethernet_rounded),
+        const SizedBox(height: 12),
         Text(_apiBase, textAlign: TextAlign.center,
           style: const TextStyle(color: _muted, fontSize: 11)),
       ]),
@@ -2422,7 +2433,21 @@ class _PgHomeState extends State<PgHome> {
                 'Avoid sharing invitation codes publicly.',
                 style: TextStyle(color: _muted, height: 1.6),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 18),
+              _secondaryAction('Server address: $_apiBase', () {
+                Navigator.pop(sheetContext);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) unawaited(_editServerAddress());
+                });
+              }, icon: Icons.settings_ethernet_rounded),
+              const SizedBox(height: 10),
+              _secondaryAction('Test Android notification', () {
+                Navigator.pop(sheetContext);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) unawaited(_testNotification());
+                });
+              }, icon: Icons.notifications_active_outlined),
+              const SizedBox(height: 12),
               _secondaryAction('Close', () => Navigator.pop(sheetContext),
                 icon: Icons.close_rounded),
             ],
