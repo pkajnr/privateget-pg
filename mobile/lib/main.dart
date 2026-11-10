@@ -12,6 +12,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'pg_media.dart';
 import 'pg_calls.dart';
 
@@ -270,6 +271,8 @@ class _PgHomeState extends State<PgHome> {
   final _messageInput = TextEditingController();
   final _messageFocus = FocusNode();
   final _imagePicker = ImagePicker();
+  late final PgCallService _calls;
+  bool _showingCallPanel = false;
   final _scroll = ScrollController();
   final _keyExchange = X25519();
   final _chats = <PgConversation>[];
@@ -303,6 +306,7 @@ class _PgHomeState extends State<PgHome> {
   void initState() {
     super.initState();
     _http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    _calls = PgCallService(_sendCallSignal);
     _register();
     // Four parallel sessions, polled conservatively to respect relay limits.
     _ticker = Timer.periodic(const Duration(seconds: 4), (_) => _tick());
@@ -311,6 +315,7 @@ class _PgHomeState extends State<PgHome> {
   @override
   void dispose() {
     _ticker?.cancel();
+    unawaited(_calls.shutdown());
     _http?.close(force: true);
     _inviteInput.dispose();
     _messageInput.dispose();
@@ -499,6 +504,7 @@ class _PgHomeState extends State<PgHome> {
           if (chat.sessionId != null) await _fetchSession(chat);
           if (chat.page == 'chat' && chat.sessionId != null) {
             await _pollMessages(chat);
+            await _pollCallSignals(chat);
           }
         } catch (e) {
           // A server restart destroys volatile sessions in this alpha.
@@ -676,6 +682,9 @@ class _PgHomeState extends State<PgHome> {
   }
 
   void _closeLocalChat(PgConversation chat) {
+    if (_calls.sessionId == chat.sessionId && _calls.callId != null) {
+      unawaited(_calls.close(sendEnd: false));
+    }
     chat.clearSensitive();
     chat.page = 'ended';
     if (mounted) {
@@ -715,6 +724,9 @@ class _PgHomeState extends State<PgHome> {
       }
     } catch (e) {
       _setError('Could not confirm termination on server: $e');
+    }
+    if (_calls.sessionId == sessionId && _calls.callId != null) {
+      await _calls.close(sendEnd: false);
     }
     chat.clearSensitive();
     if (!mounted) return;
