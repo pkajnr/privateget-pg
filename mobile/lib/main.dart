@@ -739,6 +739,149 @@ class _PgHomeState extends State<PgHome> {
     });
   }
 
+  Future<void> _sendCallSignal(
+    String sid, String cid, String type, Map<String, dynamic> data) async {
+    await _request('POST', '/v1/sessions/$sid/call', {
+      'callId': cid, 'type': type, 'data': data,
+    });
+  }
+
+  Future<bool> _confirmIncomingCall(PgConversation chat, bool isVideo) async {
+    if (!mounted || chat.cleared || !_chats.contains(chat)) return false;
+    final accepted = await showDialog<bool>(context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _surface,
+        title: Text(isVideo ? 'Incoming PG video call' : 'Incoming PG voice call'),
+        content: const Text('This is an experimental, unaudited WebRTC call. '
+          'Accept only from a contact whose safety code you verified.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Decline')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Answer')),
+        ],
+      ));
+    if (accepted == true && mounted && !chat.cleared) {
+      _openChat(chat);
+    }
+    return accepted == true && mounted && !chat.cleared;
+  }
+
+  Future<void> _pollCallSignals(PgConversation chat) async {
+    final sid = chat.sessionId;
+    if (sid == null || chat.cleared) return;
+    final data = await _request('GET', '/v1/sessions/$sid/call');
+    final signals = data['signals'];
+    if (signals is! List) return;
+    for (final item in signals) {
+      if (!mounted || chat.cleared || !_chats.contains(chat)) break;
+      try {
+        await _calls.handle(
+          sid, Map<String, dynamic>.from(item as Map),
+          confirmIncoming: (video) => _confirmIncomingCall(chat, video),
+        );
+        if (_calls.sessionId == sid &&
+            _calls.callId != null && !_showingCallPanel) {
+          unawaited(_openCallPanel());
+        }
+      } catch (error) {
+        _setError('Call signaling failed. $error');
+      }
+    }
+  }
+
+  Future<void> _startCall(bool video) async {
+    final chat = _selectedChat;
+    if (chat == null || chat.page != 'chat' || chat.sessionId == null ||
+        _calls.callId != null || _busy) return;
+    try {
+      await _calls.dial(chat.sessionId!, withVideo: video);
+      if (mounted && _calls.callId != null) unawaited(_openCallPanel());
+    } catch (error) {
+      _setError('Unable to start call. $error');
+    }
+  }
+
+  Future<void> _openCallPanel() async {
+    if (!mounted || _showingCallPanel) return;
+    _showingCallPanel = true;
+    try {
+      await showDialog<void>(
+        context: context, barrierDismissible: false,
+        builder: (dialogContext) => PopScope<void>(
+          canPop: false,
+          child: Dialog(
+            backgroundColor: _bg,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 12),
+            child: AnimatedBuilder(
+              animation: _calls,
+              builder: (ctx, _) => Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(_calls.video ? Icons.videocam_rounded : Icons.call_rounded,
+                    size: 32, color: _teal),
+                  const SizedBox(height: 10),
+                  Text(_calls.callId == null ? 'Call ended'
+                      : _calls.active ? 'PG call connected' : 'Connecting PG call…',
+                    style: const TextStyle(color: _white, fontSize: 19,
+                      fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  const Text('EXPERIMENTAL · NOT SECURITY AUDITED',
+                    style: TextStyle(color: _danger, fontSize: 10)),
+                  const SizedBox(height: 16),
+                  if (_calls.video && _calls.callId != null)
+                    SizedBox(height: 270, child: Stack(children: [
+                      Positioned.fill(child: RTCVideoView(
+                        _calls.remoteVideo,
+                        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)),
+                      Positioned(right: 8, bottom: 8, width: 100, height: 125,
+                        child: RTCVideoView(_calls.localVideo, mirror: true)),
+                    ]))
+                  else
+                    const SizedBox(height: 110, child: Center(
+                      child: Icon(Icons.record_voice_over_rounded,
+                        size: 76, color: _muted))),
+                  const SizedBox(height: 15),
+                  if (_calls.callId != null)
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      IconButton.filledTonal(
+                        tooltip: _calls.muted ? 'Unmute' : 'Mute',
+                        onPressed: _calls.toggleMute,
+                        icon: Icon(_calls.muted ? Icons.mic_off_rounded : Icons.mic_rounded)),
+                      if (_calls.video) ...[
+                        const SizedBox(width: 10),
+                        IconButton.filledTonal(
+                          tooltip: 'Toggle camera',
+                          onPressed: _calls.toggleCamera,
+                          icon: const Icon(Icons.videocam_off_outlined)),
+                      ],
+                      const SizedBox(width: 16),
+                      IconButton.filled(
+                        tooltip: 'Hang up',
+                        style: IconButton.styleFrom(backgroundColor: _danger),
+                        onPressed: () async {
+                          await _calls.close();
+                          if (dialogContext.mounted) Navigator.pop(dialogContext);
+                        },
+                        icon: const Icon(Icons.call_end_rounded, color: _bg)),
+                    ])
+                  else
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('Close'),
+                    ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      _showingCallPanel = false;
+    }
+  }
+
   Future<void> _pickAndSendAttachment(String category) async {
     final chat = _selectedChat;
     if (_busy || chat == null || chat.page != 'chat' ||
