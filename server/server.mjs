@@ -23,7 +23,7 @@ const TURN_TTL_SECONDS = 15 * 60;
 const turnSecret = process.env.PG_TURN_SECRET || '';
 const turnUrls = (process.env.PG_TURN_URLS || '')
   .split(',').map(v => v.trim()).filter(Boolean)
-  .filter(url => /^turns?:[^\\s,/?#]+(?::[0-9]{1,5})?(?:\\?transport=(?:udp|tcp))?$/.test(url));
+  .filter(url => /^(?:turn|turns):[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:[?]transport=(?:udp|tcp))?$/.test(url));
 const turnConfigured = turnSecret.length >= 32 && turnUrls.length > 0;
 const devices = new Map(); // secret bearer -> {id, createdAt}
 const invites = new Map(); // hashed invitation code -> invitation metadata
