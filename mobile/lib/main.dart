@@ -21,8 +21,7 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const _defaultApiBase = String.fromEnvironment(
-    'PG_API_URL', defaultValue: 'http://10.0.2.2:8787');
+const _defaultApiBase = String.fromEnvironment('PG_API_URL', defaultValue: 'http://10.0.2.2:8787');
 const _privateAlerts = MethodChannel('pg/private_notifications');
 const _bg = Color(0xFF0B1523);
 const _surface = Color(0xFF17283B);
@@ -354,52 +353,44 @@ class _PgRenameDialogState extends State<PgRenameDialog> {
   );
 }
 
-// The settings dialog owns its text controller until the route is disposed.
+// The dialog owns its controller until the route finishes closing.
 class PgServerAddressDialog extends StatefulWidget {
   const PgServerAddressDialog({super.key, required this.initialUrl});
   final String initialUrl;
-
   @override
   State<PgServerAddressDialog> createState() => _PgServerAddressDialogState();
 }
-
 class _PgServerAddressDialogState extends State<PgServerAddressDialog> {
   late final TextEditingController _controller;
-
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialUrl);
   }
-
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
   }
-
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: const Text('PG server address'),
-    content: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Open Render, copy the Web Service HTTPS URL, '
-          'and paste it here. Do not guess its hostname.'),
-        const SizedBox(height: 14),
-        TextField(
-          controller: _controller,
-          keyboardType: TextInputType.url,
-          autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: 'Server HTTPS URL',
-            hintText: 'https://your-service.onrender.com',
-          ),
-          onSubmitted: (value) => Navigator.pop(context, value),
+    content: Column(mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Open the Render dashboard and copy the exact HTTPS '
+        'address of the PG web service.'),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _controller,
+        keyboardType: TextInputType.url,
+        autocorrect: false,
+        decoration: const InputDecoration(
+          labelText: 'Server address',
+          hintText: 'https://your-service.onrender.com',
         ),
-      ],
-    ),
+        onSubmitted: (value) => Navigator.pop(context, value),
+      ),
+    ]),
     actions: [
       TextButton(onPressed: () => Navigator.pop(context),
         child: const Text('Cancel')),
@@ -517,11 +508,10 @@ class _PgHomeState extends State<PgHome> {
     final HttpClientRequest request;
     try {
       request = await _http!.openUrl(method, uri)
-        .timeout(const Duration(seconds: 7));
+          .timeout(const Duration(seconds: 7));
     } on SocketException {
-      throw ApiException(
-        'PG cannot resolve ${uri.host}. Open Server address and use '
-        'the exact HTTPS URL shown in your Render dashboard.');
+      throw ApiException('Cannot resolve or reach the PG host ' + uri.host +
+        '. Open Server address and use the HTTPS URL from your Render dashboard.');
     }
     request.headers.set('Accept', 'application/json');
     request.headers.set('Cache-Control', 'no-store');
@@ -544,24 +534,21 @@ class _PgHomeState extends State<PgHome> {
         setState(() => _apiBase = saved);
       }
     } catch (_) {
-      // Preferences are optional; the build-time endpoint remains the fallback.
+      // Keep the build-time address when preferences cannot be loaded.
     }
     if (mounted) await _register();
   }
 
-  static bool _validPgServerUrl(String candidate) {
-    final uri = Uri.tryParse(candidate.trim());
-    if (uri == null || !uri.hasAuthority ||
-        uri.host.isEmpty || uri.userInfo.isNotEmpty ||
-        uri.hasQuery || uri.hasFragment ||
+  static bool _validPgServerUrl(String url) {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || !uri.hasAuthority || uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment ||
         (uri.path.isNotEmpty && uri.path != '/')) return false;
     if (uri.scheme == 'https') return true;
     if (uri.scheme != 'http') return false;
-    // HTTP is for local alpha development only; never permit remote HTTP.
     return uri.host == 'localhost' || uri.host == '127.0.0.1' ||
         uri.host == '10.0.2.2' ||
-        uri.host.startsWith('192.168.') ||
-        uri.host.startsWith('10.');
+        uri.host.startsWith('192.168.') || uri.host.startsWith('10.');
   }
 
   Future<void> _register() async {
@@ -1753,661 +1740,6 @@ class _PgHomeState extends State<PgHome> {
     if (confirmed == true && mounted) await _endChat();
   }
 
-  Future<void> _editServerAddress() async {
-    if (!mounted) return;
-    final selected = await showDialog<String>(
-      context: context,
-      builder: (_) => PgServerAddressDialog(initialUrl: _apiBase),
-    );
-    if (!mounted || selected == null) return;
-    final normalized = selected.trim().replaceFirst(RegExp(r'/
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: _surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 30),
-          child: Column(mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _iconTile(Icons.security_rounded),
-              const SizedBox(height: 18),
-              const Text('About this PG build', style: TextStyle(
-                color: _white, fontSize: 23, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 10),
-              const Text(
-                'PrivateGet is currently an experimental alpha. '
-                'The message encryption protocol has not been independently audited. '
-                'Do not send secrets or sensitive personal information. '
-                'Avoid sharing invitation codes publicly.',
-                style: TextStyle(color: _muted, height: 1.6),
-              ),
-              const SizedBox(height: 22),
-              _secondaryAction('Close', () => Navigator.pop(sheetContext),
-                icon: Icons.close_rounded),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _errorBanner() => Container(
-    margin: const EdgeInsets.fromLTRB(18, 8, 18, 0),
-    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-    decoration: BoxDecoration(
-      color: const Color(0xFF3D2732),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: _danger.withValues(alpha: 0.3)),
-    ),
-    child: Row(children: [
-      const Icon(Icons.error_outline_rounded, color: _danger, size: 20),
-      const SizedBox(width: 10),
-      Expanded(child: Text(_error!, maxLines: 3, overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: Color(0xFFFFCFD2), fontSize: 12, height: 1.4))),
-      IconButton(
-        tooltip: 'Dismiss error', onPressed: () => setState(() => _error = null),
-        icon: const Icon(Icons.close, color: _muted, size: 17),
-      ),
-    ]),
-  );
-
-  Widget _connectionFooter(bool online) => Padding(
-    padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Icon(Icons.circle, size: 7, color: online ? _teal : _orange),
-      const SizedBox(width: 7),
-      Flexible(child: Text(
-        online ? 'Connected to PG relay • Device ${_deviceId!.substring(0, 8)}'
-          : 'Connecting to your PG relay',
-        textAlign: TextAlign.center,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: _muted, fontSize: 10),
-      )),
-    ]),
-  );
-
-
-  @override
-  Widget build(BuildContext context) {
-    final online = _token != null;
-    // Keep the same widget positions when the keyboard opens. Moving the
-    // TextField to another element slot used to make Android lose focus.
-    final typing = online && _page == 'chat' &&
-        MediaQuery.viewInsetsOf(context).bottom > 0;
-    final connected = online && _page == 'chat';
-    return PopScope<void>(
-      // Back from a conversation returns to the list; back from home exits.
-      canPop: _selectedChat == null && _pickerMode == 'none',
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop || !mounted) return;
-        if (_pickerMode != 'none') {
-          setState(() => _pickerMode = 'none');
-        } else if (_selectedChat != null) {
-          _returnHome();
-        }
-      },
-      child: Scaffold(
-      resizeToAvoidBottomInset: true,
-      appBar: AppBar(
-        toolbarHeight: 66,
-        titleSpacing: _selectedChat == null ? 18 : 0,
-        leading: _selectedChat == null ? null : IconButton(
-          tooltip: 'All conversations',
-          onPressed: _returnHome,
-          icon: const Icon(Icons.arrow_back_rounded, color: _white),
-        ),
-        title: Row(children: [
-          Container(
-            width: 34, height: 34,
-            decoration: BoxDecoration(
-              color: _orange.withValues(alpha: 0.13),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: const Icon(Icons.shield_outlined, color: _orange, size: 21),
-          ),
-          const SizedBox(width: 9),
-          const Flexible(child: Text('PrivateGet',
-            maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: _white,
-              fontWeight: FontWeight.w800, fontSize: 19))),
-          const SizedBox(width: 9),
-          Container(width: 8, height: 8, decoration: BoxDecoration(
-            color: connected ? _teal : (online ? _orange : _muted),
-            shape: BoxShape.circle,
-          )),
-        ]),
-        actions: [
-          if (_selectedChat != null && !_selectedChat!.cleared && _page != 'chat')
-            IconButton(
-              tooltip: 'Rename conversation',
-              onPressed: () => _renameChat(_selectedChat!),
-              icon: const Icon(Icons.edit_outlined, color: _orange),
-            ),
-          if (online && _page == 'chat') ...[
-            IconButton(
-              tooltip: 'PG voice call (experimental)',
-              onPressed: () => _startCall(false),
-              icon: const Icon(Icons.call_outlined, color: _white),
-            ),
-            IconButton(
-              tooltip: 'PG video call (experimental)',
-              onPressed: () => _startCall(true),
-              icon: const Icon(Icons.videocam_outlined, color: _white),
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'Conversation actions',
-              icon: const Icon(Icons.more_vert_rounded, color: _white),
-              color: _surface,
-              onSelected: (value) {
-                if (value == 'rename' && _selectedChat != null) {
-                  _renameChat(_selectedChat!);
-                }
-                if (value == 'verify') _showSafetyCode();
-                if (value == 'end') _confirmEnd();
-                if (value == 'about') _showPrivacyNote();
-              },
-              itemBuilder: (ctx) => const [
-                PopupMenuItem(value: 'rename', child: Text('Rename conversation')),
-                PopupMenuItem(value: 'verify',
-                  child: Text('Verify safety code')),
-                PopupMenuItem(value: 'end',
-                  child: Text('End conversation')),
-                PopupMenuItem(value: 'about',
-                  child: Text('About this alpha')),
-              ],
-            ),
-          ]
-          else
-            IconButton(
-              tooltip: 'Privacy and build information',
-              onPressed: _showPrivacyNote,
-              icon: const Icon(Icons.info_outline_rounded, color: _muted),
-            ),
-        ],
-      ),
-      body: Container(
-        decoration: const BoxDecoration(gradient: LinearGradient(
-          begin: Alignment.topCenter, end: Alignment.bottomCenter,
-          colors: [_bg, Color(0xFF101D2E)],
-        )),
-        child: SafeArea(child: Column(children: [
-          Visibility(
-            visible: !typing,
-            maintainState: true,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 17, vertical: 9),
-              color: const Color(0xFF352C20),
-              child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(Icons.warning_amber_rounded, color: _orange, size: 16),
-                SizedBox(width: 8),
-                Flexible(child: Text('EARLY ACCESS · NOT SECURITY AUDITED',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 10, color: Color(0xFFFFD99E),
-                    fontWeight: FontWeight.w800, letterSpacing: 0.7))),
-              ]),
-            ),
-          ),
-          Visibility(
-            visible: _error != null,
-            maintainState: true,
-            child: _error != null ? _errorBanner() : const SizedBox.shrink(),
-          ),
-          Visibility(
-            visible: !typing,
-            maintainState: true,
-            child: _sessionStrip(),
-          ),
-          Expanded(child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-            child: KeyedSubtree(
-              key: ValueKey<String>(
-                '${_selectedChat?.number ?? 0}:${_page}:${online ? "online" : "offline"}'),
-              child: _renderBody(online),
-            ),
-          )),
-          Visibility(
-            visible: !typing,
-            maintainState: true,
-            child: _connectionFooter(online),
-          ),
-        ])),
-      ),
-      ),
-    );
-  }
-
-  Widget _renderBody(bool online) {
-    if (!online) return Center(child: SingleChildScrollView(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        _iconTile(Icons.cloud_off_outlined, color: _orange),
-        const SizedBox(height: 20),
-        const Text('Connecting to PrivateGet', style: TextStyle(
-          fontSize: 23, fontWeight: FontWeight.w800, color: _white)),
-        const SizedBox(height: 11),
-        const Text('The app needs a reachable PG server before you can invite contacts or chat.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: _muted, fontSize: 14, height: 1.5)),
-        const SizedBox(height: 22),
-        _primaryAction('Try connecting again', _register, icon: Icons.refresh_rounded),
-        const SizedBox(height: 12),
-        _secondaryAction('Change PG server address', _editServerAddress,
-          icon: Icons.settings_ethernet_rounded),
-        const SizedBox(height: 12),
-        Text(_apiBase, textAlign: TextAlign.center,
-          style: const TextStyle(color: _muted, fontSize: 11)),
-      ]),
-    ));
-
-    if (_page == 'home') return SingleChildScrollView(child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _statusChip('INVITATION-ONLY', icon: Icons.lock_outline_rounded, color: _orange),
-        const SizedBox(height: 20),
-        _heading('A private space for your conversations.',
-          'Start a temporary conversation with someone you trust, or join using their one-time invite.'),
-        const SizedBox(height: 24),
-        _card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            _iconTile(Icons.add_comment_outlined),
-            const SizedBox(width: 12),
-            const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Start a private chat', style: TextStyle(
-                color: _white, fontSize: 17, fontWeight: FontWeight.w800)),
-              SizedBox(height: 3),
-              Text('Create an invitation', style: TextStyle(color: _muted, fontSize: 12)),
-            ])),
-          ]),
-          const SizedBox(height: 17),
-          const Text('Generate a one-time code to share directly with your contact.',
-            style: TextStyle(color: _muted, fontSize: 13, height: 1.5)),
-          const SizedBox(height: 18),
-          _primaryAction(_busy ? 'Creating invite…' : 'Create invitation', _createInvite,
-            disabled: _busy, icon: Icons.arrow_forward_rounded),
-        ])),
-        const SizedBox(height: 15),
-        _card(Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            _iconTile(Icons.link_rounded, color: _teal),
-            const SizedBox(width: 12),
-            const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Join a conversation', style: TextStyle(
-                color: _white, fontSize: 17, fontWeight: FontWeight.w800)),
-              SizedBox(height: 3),
-              Text('Received an invite?', style: TextStyle(color: _muted, fontSize: 12)),
-            ])),
-          ]),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _inviteInput,
-            autocorrect: false,
-            enableSuggestions: false,
-            textCapitalization: TextCapitalization.none,
-            decoration: const InputDecoration(
-              hintText: 'Paste your invitation code',
-              prefixIcon: Icon(Icons.vpn_key_outlined, color: _muted),
-            ),
-          ),
-          const SizedBox(height: 12),
-          _primaryAction(_busy ? 'Joining…' : 'Join private chat', _acceptInvite,
-            disabled: _busy, icon: Icons.arrow_forward_rounded),
-        ])),
-        const SizedBox(height: 22),
-        Wrap(spacing: 16, runSpacing: 12, children: [
-          _featurePill(Icons.shield_outlined, 'One-time invites'),
-          _featurePill(Icons.timer_outlined, 'Temporary sessions'),
-          _featurePill(Icons.visibility_off_outlined, 'No public directory'),
-        ]),
-        const SizedBox(height: 25),
-      ],
-    ));
-
-    if (_page == 'inviting') return SingleChildScrollView(child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _heading('Invitation ready',
-          'Send this code to the person you want to speak with.', eyebrow: 'NEW CONVERSATION'),
-        const SizedBox(height: 23),
-        _card(Column(children: [
-          _iconTile(Icons.link_rounded),
-          const SizedBox(height: 15),
-          _sectionLabel('YOUR SINGLE-USE INVITE'),
-          const SizedBox(height: 13),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 17, horizontal: 13),
-            decoration: BoxDecoration(
-              color: _field, borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _stroke),
-            ),
-            child: SelectableText(_inviteCode ?? '', textAlign: TextAlign.center,
-              style: const TextStyle(color: _white, fontSize: 15,
-                fontWeight: FontWeight.w800, letterSpacing: 0.7)),
-          ),
-          const SizedBox(height: 16),
-          _primaryAction(_inviteCode == null
-              ? 'Creating invitation…' : 'Share invitation', _shareInvite,
-            disabled: _inviteCode == null, icon: Icons.share_rounded),
-          const SizedBox(height: 15),
-          const Text('Expires after 10 minutes • Can only be used once',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: _muted, fontSize: 11)),
-        ])),
-        const SizedBox(height: 25),
-        Row(children: [
-          const SizedBox(width: 18, height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2, color: _orange)),
-          const SizedBox(width: 12),
-          const Expanded(child: Text('Waiting for your contact to join…',
-            style: TextStyle(color: _white, fontSize: 13, fontWeight: FontWeight.w600))),
-        ]),
-        const SizedBox(height: 27),
-        _secondaryAction('Cancel invitation', _stopToHome, icon: Icons.close_rounded),
-      ],
-    ));
-
-    if (_page == 'waiting') return SingleChildScrollView(child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _heading(
-          _role == 'A' ? 'Review connection request' : 'Awaiting confirmation',
-          _role == 'A'
-            ? 'Someone used your invitation. Confirm this is the person you intended to connect with.'
-            : 'Your invitation was accepted. The contact who invited you must confirm this connection.',
-          eyebrow: 'PRIVATE CONNECTION',
-        ),
-        const SizedBox(height: 24),
-        _card(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Align(alignment: Alignment.centerLeft,
-            child: _statusChip(
-              _sessionState == 'awaiting_approval' ? 'AWAITING APPROVAL' : 'CONNECTING',
-              icon: Icons.schedule_rounded, color: _orange)),
-          const SizedBox(height: 20),
-          const Text('Connection safety code', style: TextStyle(
-            color: _white, fontWeight: FontWeight.w700, fontSize: 15)),
-          const SizedBox(height: 8),
-          const Text('Compare this code on both phones before discussing anything private.',
-            style: TextStyle(color: _muted, fontSize: 12, height: 1.4)),
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 17),
-            decoration: BoxDecoration(color: _field,
-              borderRadius: BorderRadius.circular(12)),
-            child: Text(_safetyCode ?? 'Generating code…',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: _orange, fontSize: 23,
-                fontWeight: FontWeight.w800, letterSpacing: 2.1)),
-          ),
-          if (_role == 'A' && _sessionState == 'awaiting_approval') ...[
-            const SizedBox(height: 19),
-            _primaryAction(_busy ? 'Confirming…' : 'Confirm this contact', _approve,
-              disabled: _busy, icon: Icons.check_rounded),
-          ],
-        ])),
-        const SizedBox(height: 22),
-        _secondaryAction('Cancel connection', _confirmEnd,
-          icon: Icons.close_rounded, danger: true),
-      ],
-    ));
-
-    if (_page == 'chat') return Column(children: [
-      // No large contact card: status is the dot beside PrivateGet.
-      // Safety verification remains available in the top toolbar.
-      Expanded(child: _messages.isEmpty
-        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.chat_bubble_outline_rounded,
-              size: 46, color: _muted.withValues(alpha: 0.7)),
-            const SizedBox(height: 12),
-            const Text('Your conversation starts here', style: TextStyle(
-              fontWeight: FontWeight.w700, color: _white, fontSize: 15)),
-            const SizedBox(height: 7),
-            const Text('Messages appear during this session. Check the safety code on both phones.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: _muted, fontSize: 12, height: 1.45)),
-          ]))
-        : ListView.builder(
-            controller: _scroll,
-            padding: const EdgeInsets.only(bottom: 14),
-            itemCount: _messages.length,
-            itemBuilder: (context, index) {
-              final message = _messages[index];
-              return Align(
-                alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
-                child: InkWell(
-                  key: ValueKey('pg-message-$index'),
-                  onLongPress: () => _replyTo(message),
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                  constraints: BoxConstraints(
-                    maxWidth: MediaQuery.of(context).size.width * 0.77),
-                  margin: const EdgeInsets.symmetric(vertical: 5),
-                  padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: message.mine ? const Color(0xFF3D341F) : _surface,
-                    border: Border.all(color: message.mine
-                      ? _orange.withValues(alpha: 0.26) : _stroke),
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(16),
-                      topRight: const Radius.circular(16),
-                      bottomLeft: Radius.circular(message.mine ? 16 : 5),
-                      bottomRight: Radius.circular(message.mine ? 5 : 16),
-                    ),
-                  ),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(message.mine ? 'YOU' : 'CONTACT',
-                        style: TextStyle(color: message.mine ? _orange : _teal,
-                          letterSpacing: 0.9, fontWeight: FontWeight.w800,
-                          fontSize: 9)),
-                      const SizedBox(width: 16),
-                      InkWell(
-                        onTap: () => _replyTo(message),
-                        child: const Padding(
-                          padding: EdgeInsets.all(5),
-                          child: Icon(Icons.reply_rounded, color: _muted, size: 17),
-                        ),
-                      ),
-                    ]),
-                    if (message.quotedText != null) ...[
-                      const SizedBox(height: 7),
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: _bg.withValues(alpha: 0.55),
-                          border: const Border(
-                            left: BorderSide(color: _teal, width: 3)),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(message.quotedMine == true ? 'You' : 'Contact',
-                              style: const TextStyle(color: _teal, fontSize: 10,
-                                fontWeight: FontWeight.w800)),
-                            Text(message.quotedText!,
-                              maxLines: 3, overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: _muted, fontSize: 12)),
-                          ]),
-                      ),
-                    ],
-                    const SizedBox(height: 5),
-                    if (PgAttachment.fromMessage(message.text) != null)
-                      _buildAttachmentBubble(
-                        PgAttachment.fromMessage(message.text)!, message.mine)
-                    else if (message.text.startsWith(pgFilePrefix))
-                      const Text('Unsupported attachment',
-                        style: TextStyle(color: _muted))
-                    else if (decodePgStatus(message.text) != null)
-                      _pgStatusMessage(decodePgStatus(message.text)!)
-                    else
-                      Text(
-                        decodePgSticker(message.text) ?? message.text,
-                        style: TextStyle(
-                          color: _white,
-                          fontSize: decodePgSticker(message.text) == null ? 14 : 43,
-                          height: 1.45,
-                        ),
-                      ),
-                  ]),
-                ),
-                ),
-              );
-            },
-          )),
-      if (_pickerMode == 'sticker') _buildChatPicker(),
-      if (_replyTarget != null) _replyPreviewBar(),
-      Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-        IconButton(
-          tooltip: 'Attach photo, video or document',
-          icon: const Icon(Icons.add_circle_outline_rounded, color: _teal),
-          onPressed: _busy ? null : _showAttachmentOptions,
-        ),
-        Expanded(child: TextField(
-          controller: _messageInput,
-          focusNode: _messageFocus,
-          minLines: 1, maxLines: 3, maxLength: 2000,
-          keyboardType: TextInputType.multiline,
-          textInputAction: TextInputAction.newline,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: InputDecoration(
-            hintText: 'Message', counterText: '',
-            filled: true,
-            fillColor: _field,
-            isDense: true,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16, vertical: 13),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(26),
-              borderSide: const BorderSide(color: _stroke),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(26),
-              borderSide: const BorderSide(color: _stroke),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(26),
-              borderSide: const BorderSide(color: _orange, width: 1.5),
-            ),
-          ),
-        )),
-        IconButton(
-          tooltip: 'Open emoji and sticker tray',
-          icon: const Icon(Icons.emoji_emotions_outlined, color: _teal),
-          onPressed: () => _togglePicker('sticker'),
-        ),
-        IconButton(
-          tooltip: 'Take photo',
-          icon: const Icon(Icons.camera_alt_outlined, color: _muted),
-          onPressed: _busy ? null : () => _pickAndSendAttachment('camera'),
-        ),
-        SizedBox(width: 46, height: 48, child: IconButton.filled(
-          tooltip: 'Send message',
-          onPressed: _busy ? null : () => _sendMessage(),
-          style: IconButton.styleFrom(
-            backgroundColor: _orange, foregroundColor: _bg,
-            shape: const CircleBorder(),
-          ),
-          icon: const Icon(Icons.send_rounded, size: 20),
-        )),
-      ]),
-
-      // The composer remains the last child, fixed immediately above
-      // the Android keyboard. Navigation/end controls live in the toolbar.
-    ]);
-
-    if (_page == 'ended') return Center(child: SingleChildScrollView(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        _iconTile(Icons.lock_clock_outlined, color: _teal),
-        const SizedBox(height: 18),
-        const Text('Conversation closed', textAlign: TextAlign.center,
-          style: TextStyle(color: _white, fontSize: 26, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 12),
-        Text(_error == null
-            ? 'This device discarded the chat messages and session keys. '
-              'A fresh invitation is required to talk again.'
-            : 'This device discarded its chat state, but the PG server did not confirm termination. '
-              'Please check the connection before using PG again.',
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: _muted, fontSize: 14, height: 1.6)),
-        const SizedBox(height: 25),
-        _primaryAction('Back to conversations', _stopToHome,
-          icon: Icons.arrow_forward_rounded),
-      ]),
-    ));
-
-    return const SizedBox.shrink();
-  }
-}
-), '');
-    if (!_validPgServerUrl(normalized)) {
-      _setError('Enter the exact HTTPS address from your Render service.');
-      return;
-    }
-    if (normalized == _apiBase) {
-      await _register();
-      return;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Change PG server?'),
-        content: const Text(
-          'Changing servers discards your local chat sessions and keys. '
-          'This cannot confirm deletion on the old server. '
-          'You will need new invitations to chat again.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Change server')),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    await _calls.close(sendEnd: false);
-    _http?.close(force: true);
-    _http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
-    setState(() {
-      for (final chat in _chats) chat.clearSensitive();
-      _chats.clear();
-      _selectedChat = null;
-      _messageInput.clear();
-      _inviteInput.clear();
-      _replyTarget = null;
-      _pickerMode = 'none';
-      _apiBase = normalized;
-      _token = null;
-      _deviceId = null;
-      _error = null;
-    });
-    try {
-      await SharedPreferencesAsync().setString('pg_server_url_v1', normalized);
-    } catch (_) {
-      _setError('Could not save the server address; it may reset on restart.');
-    }
-    if (mounted) await _register();
-  }
-
-  Future<void> _testNotification() async {
-    if (!mounted) return;
-    await _requestNotificationPermission();
-    try {
-      final shown = await _privateAlerts.invokeMethod<bool>('showPrivateMessage');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(shown == true
-          ? 'PG requested an Android notification. Check your notification shade.'
-          : 'Notifications are blocked. Enable them in Android App settings.'),
-      ));
-    } catch (_) {
-      _setError('Cannot show notification on this device.');
-    }
-  }
-
   void _showPrivacyNote() {
     showModalBottomSheet<void>(
       context: context,
@@ -2433,21 +1765,7 @@ class _PgHomeState extends State<PgHome> {
                 'Avoid sharing invitation codes publicly.',
                 style: TextStyle(color: _muted, height: 1.6),
               ),
-              const SizedBox(height: 18),
-              _secondaryAction('Server address: $_apiBase', () {
-                Navigator.pop(sheetContext);
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) unawaited(_editServerAddress());
-                });
-              }, icon: Icons.settings_ethernet_rounded),
-              const SizedBox(height: 10),
-              _secondaryAction('Test Android notification', () {
-                Navigator.pop(sheetContext);
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) unawaited(_testNotification());
-                });
-              }, icon: Icons.notifications_active_outlined),
-              const SizedBox(height: 12),
+              const SizedBox(height: 22),
               _secondaryAction('Close', () => Navigator.pop(sheetContext),
                 icon: Icons.close_rounded),
             ],
