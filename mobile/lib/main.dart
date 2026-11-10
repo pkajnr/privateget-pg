@@ -904,15 +904,20 @@ class _PgHomeState extends State<PgHome> {
     if (_busy || chat == null || chat.page != 'chat' ||
         chat.sessionId == null || _token == null) return;
     try {
-      String? path;
-      String? filename;
+      String filename;
+      late final List<int> data;
       String kind = category;
       if (category == 'document') {
-        final selected = await FilePicker.pickFiles(
-          type: FileType.any, allowMultiple: false, withData: false);
-        if (selected == null || selected.files.isEmpty) return;
-        path = selected.files.single.path;
-        filename = selected.files.single.name;
+        // file_picker 12.x uses a federated Android plugin compatible with
+        // AGP 9 and exposes a single PlatformFile through pickFile().
+        final selected = await FilePicker.pickFile(type: FileType.any);
+        if (selected == null) return;
+        final fileLength = await selected.length();
+        if (fileLength < 1 || fileLength > pgFileMaxBytes) {
+          throw StateError('Choose a non-empty file smaller than 12 MB for PG alpha.');
+        }
+        filename = selected.name;
+        data = await selected.readAsBytes();
         kind = 'document';
       } else {
         XFile? selected;
@@ -925,18 +930,18 @@ class _PgHomeState extends State<PgHome> {
           selected = await _imagePicker.pickVideo(source: ImageSource.gallery);
         }
         if (selected == null) return;
-        path = selected.path;
         filename = selected.name;
+        final fileLength = await selected.length();
+        if (fileLength < 1 || fileLength > pgFileMaxBytes) {
+          throw StateError('Choose a non-empty file smaller than 12 MB for PG alpha.');
+        }
+        data = await selected.readAsBytes();
       }
-      if (path == null || !mounted ||
-          !_chats.contains(chat) || chat.cleared) return;
-      final file = File(path);
-      final fileLength = await file.length();
-      if (fileLength > pgFileMaxBytes || fileLength < 1) {
+      if (data.isEmpty || data.length > pgFileMaxBytes) {
         throw StateError('Choose a non-empty file smaller than 12 MB for PG alpha.');
       }
+      if (!mounted || !_chats.contains(chat) || chat.cleared) return;
       setState(() { _busy = true; _error = null; });
-      final data = await file.readAsBytes();
       final attachment = await pgUploadEncrypted(
         client: _http!, apiBase: _apiBase, token: _token!,
         sessionId: chat.sessionId!, clearBytes: data,
