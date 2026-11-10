@@ -39,7 +39,7 @@ class PgApp extends StatelessWidget {
   const PgApp({super.key});
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'PrivateGet · PG',
+    title: 'PG',
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
@@ -1943,7 +1943,7 @@ class _PgHomeState extends State<PgHome> {
             child: const Icon(Icons.shield_outlined, color: _orange, size: 21),
           ),
           const SizedBox(width: 9),
-          const Flexible(child: Text('PrivateGet',
+          const Flexible(child: Text('PG',
             maxLines: 1, overflow: TextOverflow.ellipsis,
             style: TextStyle(color: _white,
               fontWeight: FontWeight.w800, fontSize: 19))),
@@ -2059,7 +2059,7 @@ class _PgHomeState extends State<PgHome> {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         _iconTile(Icons.cloud_off_outlined, color: _orange),
         const SizedBox(height: 20),
-        const Text('Connecting to PrivateGet', style: TextStyle(
+        const Text('Connecting to PG', style: TextStyle(
           fontSize: 23, fontWeight: FontWeight.w800, color: _white)),
         const SizedBox(height: 11),
         const Text('The app needs a reachable PG server before you can invite contacts or chat.',
@@ -2273,20 +2273,10 @@ class _PgHomeState extends State<PgHome> {
                     ),
                   ),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(message.mine ? 'YOU' : 'CONTACT',
-                        style: TextStyle(color: message.mine ? _orange : _teal,
-                          letterSpacing: 0.9, fontWeight: FontWeight.w800,
-                          fontSize: 9)),
-                      const SizedBox(width: 16),
-                      InkWell(
-                        onTap: () => _replyTo(message),
-                        child: const Padding(
-                          padding: EdgeInsets.all(5),
-                          child: Icon(Icons.reply_rounded, color: _muted, size: 17),
-                        ),
-                      ),
-                    ]),
+                    Text(message.mine ? 'YOU' : 'CONTACT',
+                      style: TextStyle(color: message.mine ? _orange : _teal,
+                        letterSpacing: 0.9, fontWeight: FontWeight.w800,
+                        fontSize: 9)),
                     if (message.quotedText != null) ...[
                       const SizedBox(height: 7),
                       Container(
