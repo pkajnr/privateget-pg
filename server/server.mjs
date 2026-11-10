@@ -4,7 +4,7 @@
  * EXPERIMENTAL: NOT a security-reviewed production messenger.
  */
 import http from 'node:http';
-import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 const host = process.env.PG_HOST || '0.0.0.0';
 const port = Number(process.env.PG_PORT || '8787');
@@ -17,6 +17,14 @@ const ATTACHMENT_MS = 10 * 60 * 1000;
 const MAX_CIPHERTEXT_BYTES = 12 * 1024 * 1024;
 const MAX_SESSION_ATTACHMENTS = 4;
 const CALL_SIGNAL_MS = 90 * 1000;
+// Optional TURN credentials use coturn's shared-secret REST protocol.
+// Only the backend knows PG_TURN_SECRET, never the Android/iOS app.
+const TURN_TTL_SECONDS = 15 * 60;
+const turnSecret = process.env.PG_TURN_SECRET || '';
+const turnUrls = (process.env.PG_TURN_URLS || '')
+  .split(',').map(v => v.trim()).filter(Boolean)
+  .filter(url => /^turns?:[^\\s,/?#]+(?::[0-9]{1,5})?(?:\\?transport=(?:udp|tcp))?$/.test(url));
+const turnConfigured = turnSecret.length >= 32 && turnUrls.length > 0;
 const devices = new Map(); // secret bearer -> {id, createdAt}
 const invites = new Map(); // hashed invitation code -> invitation metadata
 const sessions = new Map(); // id -> session; ciphertext is only queued in volatile memory
@@ -73,6 +81,17 @@ function checkRate(key, limit = 80) {
   let b = rate.get(key); const t = now();
   if (!b || t - b.start > 60_000) b = { start: t, n: 0 };
   b.n++; rate.set(key, b); return b.n <= limit;
+}
+function iceServersFor(deviceId) {
+  const servers = [{ urls: 'stun:stun.l.google.com:19302' }];
+  if (!turnConfigured) return { iceServers: servers, turnConfigured: false };
+  const expiration = Math.floor(now() / 1000) + TURN_TTL_SECONDS;
+  const username = expiration + ':' + deviceId.replaceAll('-', '').slice(0, 12);
+  const credential = createHmac('sha1', turnSecret)
+    .update(username).digest('base64');
+  servers.push({ urls: turnUrls, username, credential });
+  return { iceServers: servers, turnConfigured: true,
+    expiresAt: expiration };
 }
 function endSession(s, reason = 'ended') {
   s.state = 'ended'; s.reason = reason; s.endedAt = now();
@@ -186,7 +205,7 @@ const server = http.createServer(async (req, res) => {
       }
       return fail(res, 405, 'Method not allowed');
     }
-    const matchSession = /^\/v1\/sessions\/([0-9a-f-]+)(?:\/(approve|messages|end|call))?$/.exec(url.pathname);
+    const matchSession = /^\/v1\/sessions\/([0-9a-f-]+)(?:\/(approve|messages|end|call|ice))?$/.exec(url.pathname);
     if (!matchSession) return fail(res, 404, 'Route not found');
     const s = sessions.get(matchSession[1]);
     if (!s) return fail(res, 404, 'Session not found or already destroyed');
@@ -202,6 +221,14 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && action === 'end') {
       if (s.state !== 'ended') endSession(s);
       return reply(res, 200, { state: 'ended' });
+    }
+    if (action === 'ice') {
+      if (req.method !== 'GET') return fail(res, 405, 'Method not allowed');
+      if (s.state !== 'active') return fail(res, 409, 'Session not active');
+      if (!checkRate('ice:' + who.id, 30)) {
+        return fail(res, 429, 'Too many ICE requests');
+      }
+      return reply(res, 200, iceServersFor(who.id));
     }
     if (action === 'call') {
       if (s.state !== 'active') return fail(res, 409, 'Session not active');
