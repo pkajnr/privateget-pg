@@ -1220,7 +1220,7 @@ class _PgHomeState extends State<PgHome> {
     if (status != null) return status.label;
     final sticker = decodePgSticker(message.text);
     if (sticker != null) return 'Sticker $sticker';
-    final normal = message.text.replaceAll(RegExp(r'\\s+'), ' ').trim();
+    final normal = message.text.replaceAll(RegExp(r'\s+'), ' ').trim();
     return normal.length > 150 ? '${normal.substring(0, 149)}…' : normal;
   }
 
@@ -1310,33 +1310,60 @@ class _PgHomeState extends State<PgHome> {
 
   Widget _buildChatPicker() => Container(
     margin: const EdgeInsets.only(bottom: 8),
-    padding: const EdgeInsets.all(10),
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
     decoration: BoxDecoration(
       color: _surface,
       border: Border.all(color: _stroke),
       borderRadius: BorderRadius.circular(18),
     ),
-    child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Align(
-        alignment: Alignment.centerLeft,
-        child: Text('STICKERS', style: TextStyle(
+    child: SizedBox(height: 236, child: SingleChildScrollView(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('PG EXCLUSIVE', style: TextStyle(
+          color: _teal, fontSize: 11, letterSpacing: 1.2,
+          fontWeight: FontWeight.w900)),
+        const SizedBox(height: 8),
+        SizedBox(height: 110, child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: pgStatusIcons.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 10),
+          itemBuilder: (context, index) {
+            final status = pgStatusIcons[index];
+            return InkWell(
+              key: ValueKey('pg-status-${status.id}'),
+              borderRadius: BorderRadius.circular(12),
+              onTap: _busy ? null : () =>
+                  _sendMessage(overrideText: encodePgStatus(status.id)),
+              child: SizedBox(width: 86, child: Column(children: [
+                _pgStatusArtwork(status, size: 68),
+                const SizedBox(height: 6),
+                Text(status.label, maxLines: 2,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: _white, fontSize: 10,
+                    fontWeight: FontWeight.w700)),
+              ])),
+            );
+          },
+        )),
+        const SizedBox(height: 10),
+        const Text('CLASSIC STICKERS', style: TextStyle(
           color: _muted, fontSize: 11, letterSpacing: 1.2,
           fontWeight: FontWeight.w800)),
-      ),
-      const SizedBox(height: 8),
-      SizedBox(height: 116, child: SingleChildScrollView(
-        child: Wrap(spacing: 6, runSpacing: 6, children: [
-          for (final glyph in _pgStickerChoices)
-            SizedBox(width: 62, height: 58, child: IconButton(
-              tooltip: 'Send sticker $glyph',
-              padding: EdgeInsets.zero,
-              onPressed: _busy ? null : () =>
-                  _sendMessage(overrideText: encodePgSticker(glyph)),
-              icon: Text(glyph, style: const TextStyle(fontSize: 38)),
-            )),
-        ]),
-      )),
-    ]),
+        const SizedBox(height: 4),
+        SizedBox(height: 54, child: ListView(
+          scrollDirection: Axis.horizontal,
+          children: [
+            for (final glyph in _pgStickerChoices)
+              SizedBox(width: 55, height: 52, child: IconButton(
+                tooltip: 'Send sticker $glyph',
+                padding: EdgeInsets.zero,
+                onPressed: _busy ? null : () =>
+                    _sendMessage(overrideText: encodePgSticker(glyph)),
+                icon: Text(glyph, style: const TextStyle(fontSize: 34)),
+              )),
+          ],
+        )),
+      ]),
+    )),
   );
 
   void _scrollDown() {
@@ -2048,7 +2075,11 @@ class _PgHomeState extends State<PgHome> {
               final message = _messages[index];
               return Align(
                 alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
-                child: Container(
+                child: InkWell(
+                  key: ValueKey('pg-message-$index'),
+                  onLongPress: () => _replyTo(message),
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
                   constraints: BoxConstraints(
                     maxWidth: MediaQuery.of(context).size.width * 0.77),
                   margin: const EdgeInsets.symmetric(vertical: 5),
@@ -2065,15 +2096,50 @@ class _PgHomeState extends State<PgHome> {
                     ),
                   ),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(message.mine ? 'YOU' : 'CONTACT',
-                      style: TextStyle(color: message.mine ? _orange : _teal,
-                        letterSpacing: 0.9, fontWeight: FontWeight.w800, fontSize: 9)),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text(message.mine ? 'YOU' : 'CONTACT',
+                        style: TextStyle(color: message.mine ? _orange : _teal,
+                          letterSpacing: 0.9, fontWeight: FontWeight.w800,
+                          fontSize: 9)),
+                      const SizedBox(width: 16),
+                      InkWell(
+                        onTap: () => _replyTo(message),
+                        child: const Padding(
+                          padding: EdgeInsets.all(5),
+                          child: Icon(Icons.reply_rounded, color: _muted, size: 17),
+                        ),
+                      ),
+                    ]),
+                    if (message.quotedText != null) ...[
+                      const SizedBox(height: 7),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _bg.withValues(alpha: 0.55),
+                          border: const Border(
+                            left: BorderSide(color: _teal, width: 3)),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(message.quotedMine == true ? 'You' : 'Contact',
+                              style: const TextStyle(color: _teal, fontSize: 10,
+                                fontWeight: FontWeight.w800)),
+                            Text(message.quotedText!,
+                              maxLines: 3, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: _muted, fontSize: 12)),
+                          ]),
+                      ),
+                    ],
                     const SizedBox(height: 5),
                     if (PgAttachment.fromMessage(message.text) != null)
                       _buildAttachmentBubble(
                         PgAttachment.fromMessage(message.text)!, message.mine)
                     else if (message.text.startsWith(pgFilePrefix))
-                      const Text('Unsupported attachment', style: TextStyle(color: _muted))
+                      const Text('Unsupported attachment',
+                        style: TextStyle(color: _muted))
+                    else if (decodePgStatus(message.text) != null)
+                      _pgStatusMessage(decodePgStatus(message.text)!)
                     else
                       Text(
                         decodePgSticker(message.text) ?? message.text,
@@ -2085,10 +2151,12 @@ class _PgHomeState extends State<PgHome> {
                       ),
                   ]),
                 ),
+                ),
               );
             },
           )),
       if (_pickerMode == 'sticker') _buildChatPicker(),
+      if (_replyTarget != null) _replyPreviewBar(),
       Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
         IconButton(
           tooltip: 'Attach photo, video or document',
