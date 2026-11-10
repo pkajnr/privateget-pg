@@ -3,13 +3,13 @@ description: PrivateGet networked alpha mobile app
 publish_to: none
 version: 0.9.0+9
 environment:
-  sdk: '>=3.4.0 <4.0.0'
+  sdk: '>=3.10.0 <4.0.0'
 dependencies:
   flutter:
     sdk: flutter
   cryptography: ^2.9.0
-  share_plus: 11.1.0
-  file_picker: 11.0.3
+  share_plus: 13.3.1
+  file_picker: 12.3.0
   image_picker: 1.1.2
   path_provider: 2.1.5
   open_filex: 4.7.0
