@@ -73,6 +73,29 @@ String buildInvitationShareText(String code) =>
     'This invitation works only once and expires after 10 minutes. '
     'Please do not forward it to anyone else.';
 
+// These large emoji stickers travel inside PG's existing encrypted text channel.
+const _pgEmojiChoices = <String>[
+  '😀','😂','🥰','😍','😊','😎','😢','😮','❤️','💕','👍','🙏',
+  '👏','🔥','🎉','✅','👋','💯','💪','✨','🤗','🤔','🥳','😴',
+];
+const _pgStickerChoices = <String>[
+  '🥳','❤️','😂','😍','🔥','👏','💯','🤗','🙏','🎉','💪','👋',
+];
+const _pgStickerPrefix = 'PG_STICKER:';
+
+String encodePgSticker(String glyph) {
+  if (!_pgStickerChoices.contains(glyph)) {
+    throw ArgumentError.value(glyph, 'glyph', 'Unknown PG sticker');
+  }
+  return '$_pgStickerPrefix$glyph';
+}
+
+String? decodePgSticker(String message) {
+  if (!message.startsWith(_pgStickerPrefix)) return null;
+  final glyph = message.substring(_pgStickerPrefix.length);
+  return _pgStickerChoices.contains(glyph) ? glyph : null;
+}
+
 class PgMessage {
   final String text;
   final bool mine;
@@ -262,6 +285,7 @@ class _PgHomeState extends State<PgHome> {
   String? _token, _deviceId;
   String? _error;
   bool _ending = false;
+  String _pickerMode = 'none'; // none, emoji, sticker
 
   @override
   void initState() {
@@ -334,6 +358,7 @@ class _PgHomeState extends State<PgHome> {
       _selectedChat!.draft = _messageInput.text;
     }
     setState(() {
+      _pickerMode = 'none';
       if (chat != null && add) _chats.add(chat);
       _selectedChat = chat;
       if (chat != null) chat.markRead();
@@ -548,11 +573,11 @@ class _PgHomeState extends State<PgHome> {
     }
   }
 
-  Future<void> _sendMessage() async {
+  Future<void> _sendMessage({String? overrideText}) async {
     final chat = _selectedChat;
     if (_busy || chat?.sendKey == null || chat?.sessionId == null ||
         chat?.page != 'chat') return;
-    final text = _messageInput.text.trim();
+    final text = overrideText ?? _messageInput.text.trim();
     if (text.isEmpty || text.length > 2000) return;
     final id = chat!.sessionId!;
     final key = chat.sendKey!;
@@ -573,8 +598,12 @@ class _PgHomeState extends State<PgHome> {
       setState(() {
         chat.messages.add(PgMessage(text, true));
         if (identical(_selectedChat, chat)) {
-          _messageInput.clear();
-          chat.draft = '';
+          if (overrideText == null) {
+            _messageInput.clear();
+            chat.draft = '';
+          } else {
+            _pickerMode = 'none';
+          }
         }
       });
       if (identical(_selectedChat, chat)) _scrollDown();
@@ -608,9 +637,29 @@ class _PgHomeState extends State<PgHome> {
       }
     }
     if (!mounted || chat.cleared || !_chats.contains(chat)) return;
-    setState(() => chat.receive(newItems,
-        visible: identical(_selectedChat, chat) && chat.page == 'chat'));
-    if (identical(_selectedChat, chat)) _scrollDown();
+    final showingThisChat =
+        identical(_selectedChat, chat) && chat.page == 'chat';
+    setState(() => chat.receive(newItems, visible: showingThisChat));
+    if (showingThisChat) {
+      _scrollDown();
+    } else {
+      // Foreground-only notice; never include message content.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || chat.cleared || !_chats.contains(chat)) return;
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger?.hideCurrentSnackBar();
+        messenger?.showSnackBar(SnackBar(
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 5),
+          content: const Text('New private message in PG'),
+          action: SnackBarAction(label: 'OPEN', onPressed: () {
+            if (mounted && !chat.cleared && _chats.contains(chat)) {
+              _openChat(chat);
+            }
+          }),
+        ));
+      });
+    }
   }
 
   void _closeLocalChat(PgConversation chat) {
@@ -663,6 +712,66 @@ class _PgHomeState extends State<PgHome> {
         _messageInput.clear();
       }
     });
+  }
+
+  void _togglePicker(String mode) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (!mounted || _page != 'chat') return;
+    setState(() => _pickerMode = _pickerMode == mode ? 'none' : mode);
+  }
+
+  void _appendEmoji(String glyph) {
+    if (_page != 'chat') return;
+    final input = _messageInput;
+    final old = input.value;
+    final selection = old.selection;
+    final start = selection.isValid ? selection.start : old.text.length;
+    final end = selection.isValid ? selection.end : old.text.length;
+    final updated = old.text.replaceRange(start, end, glyph);
+    if (updated.length > 2000) return;
+    input.value = TextEditingValue(
+      text: updated,
+      selection: TextSelection.collapsed(offset: start + glyph.length),
+    );
+    _selectedChat?.draft = updated;
+    setState(() => _pickerMode = 'none');
+  }
+
+  Widget _buildChatPicker() {
+    final isSticker = _pickerMode == 'sticker';
+    final choices = isSticker ? _pgStickerChoices : _pgEmojiChoices;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      constraints: const BoxConstraints(maxHeight: 162),
+      padding: const EdgeInsets.all(9),
+      decoration: BoxDecoration(
+        color: _surface,
+        border: Border.all(color: _stroke),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: SingleChildScrollView(
+        child: Wrap(spacing: 4, runSpacing: 4, children: [
+          for (final glyph in choices)
+            SizedBox(
+              width: isSticker ? 68 : 45,
+              height: isSticker ? 64 : 46,
+              child: IconButton(
+                tooltip: isSticker ? 'Send sticker $glyph' : 'Insert emoji $glyph',
+                padding: EdgeInsets.zero,
+                onPressed: _busy ? null : () {
+                  if (isSticker) {
+                    _sendMessage(overrideText: encodePgSticker(glyph));
+                  } else {
+                    _appendEmoji(glyph);
+                  }
+                },
+                icon: Text(glyph, style: TextStyle(
+                  fontSize: isSticker ? 39 : 29)),
+              ),
+            ),
+        ]),
+      ),
+    );
   }
 
   void _scrollDown() {
@@ -1038,7 +1147,18 @@ class _PgHomeState extends State<PgHome> {
     final typing = online && _page == 'chat' &&
         MediaQuery.viewInsetsOf(context).bottom > 0;
     final connected = online && _page == 'chat';
-    return Scaffold(
+    return PopScope<void>(
+      // Back from a conversation returns to the list; back from home exits.
+      canPop: _selectedChat == null && _pickerMode == 'none',
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop || !mounted) return;
+        if (_pickerMode != 'none') {
+          setState(() => _pickerMode = 'none');
+        } else if (_selectedChat != null) {
+          _returnHome();
+        }
+      },
+      child: Scaffold(
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
         toolbarHeight: 66,
@@ -1149,6 +1269,7 @@ class _PgHomeState extends State<PgHome> {
             child: _connectionFooter(online),
           ),
         ])),
+      ),
       ),
     );
   }
