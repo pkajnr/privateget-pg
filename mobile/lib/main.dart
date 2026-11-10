@@ -102,10 +102,101 @@ String? decodePgSticker(String message) {
   return _pgStickerChoices.contains(glyph) ? glyph : null;
 }
 
+// A reply's quoted text stays inside the existing encrypted message body.
+// Legacy plain-text messages continue to decode unchanged.
+const pgReplyMarker = 'PG_REPLY_V1:';
+const pgStatusMarker = 'PG_STATUS_V1:';
+
+class PgReplyPayload {
+  const PgReplyPayload(this.message, this.quoted, this.quotedFromSender);
+  final String message;
+  final String quoted;
+  final bool quotedFromSender;
+}
+
+String encodePgReply(String message, String quote, bool quoteMine) {
+  if (message.isEmpty || message.length > 1450 ||
+      quote.isEmpty || quote.length > 160) {
+    throw ArgumentError('Reply content exceeds limits');
+  }
+  return pgReplyMarker + jsonEncode({
+    'message': message,
+    'quote': quote,
+    'quoteMine': quoteMine,
+  });
+}
+
+PgReplyPayload? decodePgReply(String raw) {
+  if (!raw.startsWith(pgReplyMarker)) return null;
+  try {
+    final parsed = jsonDecode(raw.substring(pgReplyMarker.length));
+    if (parsed is! Map<String, dynamic>) return null;
+    final message = parsed['message'];
+    final quote = parsed['quote'];
+    final quoteMine = parsed['quoteMine'];
+    if (message is! String || message.isEmpty || message.length > 1450 ||
+        quote is! String || quote.isEmpty || quote.length > 160 ||
+        quoteMine is! bool) return null;
+    return PgReplyPayload(message, quote, quoteMine);
+  } catch (_) {
+    return null;
+  }
+}
+
+class PgStatusIcon {
+  const PgStatusIcon(this.id, this.label, this.icon, this.color);
+  final String id, label;
+  final IconData icon;
+  final Color color;
+}
+
+// PG-exclusive status stickers: structured identifiers are transmitted
+// inside the encrypted chat and rendered by the receiving PG app.
+const pgStatusIcons = <PgStatusIcon>[
+  PgStatusIcon('contract_agreed', 'Contract agreed',
+    Icons.handshake_rounded, Color(0xFF54D7B2)),
+  PgStatusIcon('date_fixed', 'Date fixed',
+    Icons.event_available_rounded, Color(0xFFFFB238)),
+  PgStatusIcon('terms_agreed', 'Terms agreed',
+    Icons.fact_check_rounded, Color(0xFF64D7F9)),
+  PgStatusIcon('on_the_move', 'On the move',
+    Icons.directions_run_rounded, Color(0xFFFF955C)),
+  PgStatusIcon('eating', 'Eating',
+    Icons.restaurant_rounded, Color(0xFF8CE3A3)),
+];
+
+String encodePgStatus(String id) {
+  if (!pgStatusIcons.any((status) => status.id == id)) {
+    throw ArgumentError.value(id, 'id', 'Unsupported PG status');
+  }
+  return '$pgStatusMarker$id';
+}
+
+PgStatusIcon? decodePgStatus(String raw) {
+  if (!raw.startsWith(pgStatusMarker)) return null;
+  final id = raw.substring(pgStatusMarker.length);
+  for (final status in pgStatusIcons) {
+    if (status.id == id) return status;
+  }
+  return null;
+}
+
 class PgMessage {
   final String text;
   final bool mine;
-  PgMessage(this.text, this.mine);
+  final String? quotedText;
+  final bool? quotedMine;
+  PgMessage(this.text, this.mine, {this.quotedText, this.quotedMine});
+
+  factory PgMessage.fromWire(String raw, bool mine) {
+    final reply = decodePgReply(raw);
+    if (reply == null) return PgMessage(raw, mine);
+    return PgMessage(
+      reply.message, mine,
+      quotedText: reply.quoted,
+      quotedMine: mine ? reply.quotedFromSender : !reply.quotedFromSender,
+    );
+  }
 }
 
 
