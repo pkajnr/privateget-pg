@@ -115,6 +115,8 @@ from pathlib import Path
 manifest = Path('android/app/src/main/AndroidManifest.xml')
 xml = manifest.read_text()
 permissions = [
+    ('android.permission.INTERNET','<uses-permission android:name="android.permission.INTERNET"/>'),
+    ('android.permission.POST_NOTIFICATIONS','<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>'),
     ('android.permission.CAMERA','<uses-permission android:name="android.permission.CAMERA"/>'),
     ('android.permission.RECORD_AUDIO','<uses-permission android:name="android.permission.RECORD_AUDIO"/>'),
     ('android.permission.MODIFY_AUDIO_SETTINGS','<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>'),
@@ -143,6 +145,12 @@ if ios_plist.exists():
                 '    <key>' + key + '</key>\n    <string>' + value + '</string>\n</dict>', 1)
     ios_plist.write_text(plist)
 PY
+
+# Flutter regenerates MainActivity on each CI build. Keep our native notification
+# bridge in version control and install it after native scaffold generation.
+test -f native/MainActivity.kt
+install -D native/MainActivity.kt \
+  android/app/src/main/kotlin/com/privateget/privateget_pg/MainActivity.kt
 
 # Debug-only cleartext HTTP permission for a local/LAN lab.
 # DO NOT enable cleartext in release; use HTTPS and audited E2EE for real users.
