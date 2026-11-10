@@ -1,11 +1,11 @@
-name: Verify PG media and calling branch
+name: Verify PG media and calling changes
 on:
   pull_request:
     branches:
       - main
   push:
     branches:
-      - feature/pg-attachments-calls-ui-20261110
+      - main
 jobs:
   verify:
     runs-on: ubuntu-latest
