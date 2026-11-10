@@ -1,7 +1,7 @@
 name: privateget_pg
 description: PrivateGet networked alpha mobile app
 publish_to: none
-version: 0.10.1+12
+version: 0.11.0+13
 environment:
   sdk: '>=3.10.0 <4.0.0'
 dependencies:
@@ -15,6 +15,7 @@ dependencies:
   open_filex: 4.7.0
   flutter_webrtc: 1.6.3
   shared_preferences: ^2.5.3
+  local_auth: 3.0.2
 
 dev_dependencies:
   flutter_test:
