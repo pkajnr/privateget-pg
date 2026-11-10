@@ -1740,6 +1740,82 @@ class _PgHomeState extends State<PgHome> {
     if (confirmed == true && mounted) await _endChat();
   }
 
+  Future<void> _editServerAddress() async {
+    if (!mounted) return;
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (_) => PgServerAddressDialog(initialUrl: _apiBase),
+    );
+    if (!mounted || chosen == null) return;
+    final trimmed = chosen.trim();
+    final address = trimmed.endsWith('/')
+        ? trimmed.substring(0, trimmed.length - 1) : trimmed;
+    if (!_validPgServerUrl(address)) {
+      _setError('Enter the exact HTTPS address from your Render dashboard.');
+      return;
+    }
+    if (address == _apiBase) {
+      if (_token == null) await _register();
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Switch PG servers?'),
+        content: const Text(
+          'This removes active chats and session keys from this phone. '
+          'PG cannot confirm deletion on the previous server if it is '
+          'unreachable. You will need new invitations.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Switch server')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _calls.close(sendEnd: false);
+    _http?.close(force: true);
+    _http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    setState(() {
+      for (final chat in _chats) chat.clearSensitive();
+      _chats.clear();
+      _selectedChat = null;
+      _messageInput.clear();
+      _inviteInput.clear();
+      _replyTarget = null;
+      _pickerMode = 'none';
+      _apiBase = address;
+      _token = null;
+      _deviceId = null;
+      _error = null;
+    });
+    try {
+      await SharedPreferencesAsync().setString('pg_server_url_v1', address);
+    } catch (_) {
+      _setError('PG could not save the server URL for the next app launch.');
+    }
+    if (mounted) await _register();
+  }
+
+  Future<void> _testNotification() async {
+    if (!mounted || !Platform.isAndroid) return;
+    await _requestNotificationPermission();
+    try {
+      final delivered =
+          await _privateAlerts.invokeMethod<bool>('showPrivateMessage');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(delivered == true
+          ? 'PG sent a test alert. Check the notification shade.'
+          : 'Notifications are blocked in Android settings.'),
+      ));
+    } catch (_) {
+      _setError('Could not generate the test notification.');
+    }
+  }
+
   void _showPrivacyNote() {
     showModalBottomSheet<void>(
       context: context,
@@ -1765,7 +1841,21 @@ class _PgHomeState extends State<PgHome> {
                 'Avoid sharing invitation codes publicly.',
                 style: TextStyle(color: _muted, height: 1.6),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 16),
+              _secondaryAction('Change server address', () {
+                Navigator.pop(sheetContext);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) unawaited(_editServerAddress());
+                });
+              }, icon: Icons.settings_ethernet_rounded),
+              const SizedBox(height: 10),
+              _secondaryAction('Test Android notification', () {
+                Navigator.pop(sheetContext);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) unawaited(_testNotification());
+                });
+              }, icon: Icons.notifications_active_outlined),
+              const SizedBox(height: 12),
               _secondaryAction('Close', () => Navigator.pop(sheetContext),
                 icon: Icons.close_rounded),
             ],
@@ -1973,7 +2063,11 @@ class _PgHomeState extends State<PgHome> {
           textAlign: TextAlign.center,
           style: TextStyle(color: _muted, fontSize: 14, height: 1.5)),
         const SizedBox(height: 22),
-        _primaryAction('Try connecting again', _register, icon: Icons.refresh_rounded),
+        _primaryAction('Try connecting again', _register,
+          icon: Icons.refresh_rounded),
+        const SizedBox(height: 12),
+        _secondaryAction('Change server address', _editServerAddress,
+          icon: Icons.settings_ethernet_rounded),
         const SizedBox(height: 12),
         Text(_apiBase, textAlign: TextAlign.center,
           style: const TextStyle(color: _muted, fontSize: 11)),
