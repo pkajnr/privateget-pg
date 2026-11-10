@@ -25,7 +25,7 @@ void main() {
     expect(legacy.quotedText, isNull);
     expect(decodePgReply(pgReplyMarker + '{invalid-json'), isNull);
     expect(() => encodePgReply('Hello', '', false), throwsArgumentError);
-    expect(() => encodePgReply('X' * 1500, 'Test', false),
+    expect(() => encodePgReply(List<String>.filled(1500, 'X').join(), 'Test', false),
       throwsArgumentError);
   });
 
