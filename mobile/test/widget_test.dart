@@ -4,6 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:privateget_pg/main.dart';
 
 void main() {
+  test('Invitation share message includes code and simple join instructions', () {
+    const code = 'PG-test-one-time-code-12345';
+    final message = buildInvitationShareText(code);
+    expect(message, contains(code));
+    expect(message, contains('Join a conversation'));
+    expect(message, contains('expires after 10 minutes'));
+    expect(message, isNot(contains('http://')));
+  });
+
+
   test('PG message model records message content and direction', () {
     final outgoing = PgMessage('Hello PG', true);
     final incoming = PgMessage('Received', false);
