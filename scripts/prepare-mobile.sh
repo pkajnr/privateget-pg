@@ -120,7 +120,7 @@ MANIFEST
 
 flutter pub get
 printf '\nChecking PG Flutter tests...\n'
-flutter test test/widget_test.dart
+flutter test
 printf '\nChecking PG Flutter analyzer...\n'
 flutter analyze
 printf '\nPG Flutter setup, tests and analysis completed.\n'

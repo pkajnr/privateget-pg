@@ -158,6 +158,65 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+// Keep the editing controller alive until the dialog route is actually
+// disposed. showDialog's Future can resolve before the exit animation ends.
+class PgRenameDialog extends StatefulWidget {
+  const PgRenameDialog({super.key, required this.initialName});
+  final String initialName;
+
+  @override
+  State<PgRenameDialog> createState() => _PgRenameDialogState();
+}
+
+class _PgRenameDialogState extends State<PgRenameDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    backgroundColor: _surface,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    title: const Text('Name this conversation',
+      style: TextStyle(color: _white, fontWeight: FontWeight.w800)),
+    content: Column(mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start, children: [
+      TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLength: 24,
+        textCapitalization: TextCapitalization.words,
+        decoration: const InputDecoration(
+          hintText: 'e.g. Suitor or KwameP',
+          prefixIcon: Icon(Icons.edit_outlined, color: _orange),
+        ),
+        onSubmitted: (value) => Navigator.of(context).pop(value),
+      ),
+      const SizedBox(height: 8),
+      const Text('This label is visible only on your phone and disappears when the session ends.',
+        style: TextStyle(color: _muted, fontSize: 12, height: 1.4)),
+    ]),
+    actions: [
+      TextButton(onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel')),
+      FilledButton(
+        onPressed: () => Navigator.of(context).pop(_controller.text),
+        child: const Text('Save name'),
+      ),
+    ],
+  );
+}
+
 class PgHome extends StatefulWidget {
   const PgHome({super.key});
   @override
@@ -592,43 +651,11 @@ class _PgHomeState extends State<PgHome> {
   }
 
   Future<void> _renameChat(PgConversation chat) async {
-    if (chat.cleared || chat.page == 'ended') return;
-    final controller = TextEditingController(text: chat.nickname ?? '');
+    if (chat.cleared || chat.page == 'ended' || !mounted) return;
     final chosen = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: _surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text('Name this conversation',
-          style: TextStyle(color: _white, fontWeight: FontWeight.w800)),
-        content: Column(mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start, children: [
-          TextField(
-            controller: controller,
-            autofocus: true,
-            maxLength: 24,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              hintText: 'e.g. Suitor or KwameP',
-              prefixIcon: Icon(Icons.edit_outlined, color: _orange),
-            ),
-            onSubmitted: (value) => Navigator.pop(ctx, value),
-          ),
-          const SizedBox(height: 8),
-          const Text('This label is visible only on your phone and disappears when the session ends.',
-            style: TextStyle(color: _muted, fontSize: 12, height: 1.4)),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('Save name'),
-          ),
-        ],
-      ),
+      builder: (_) => PgRenameDialog(initialName: chat.nickname ?? ''),
     );
-    controller.dispose();
     if (!mounted || chosen == null || chat.cleared ||
         !_chats.contains(chat)) return;
     setState(() => chat.rename(chosen));
@@ -1085,7 +1112,11 @@ class _PgHomeState extends State<PgHome> {
           ),
           Expanded(child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-            child: _renderBody(online),
+            child: KeyedSubtree(
+              key: ValueKey<String>(
+                '${_selectedChat?.number ?? 0}:${_page}:${online ? "online" : "offline"}'),
+              child: _renderBody(online),
+            ),
           )),
           Visibility(
             visible: !typing,
