@@ -1500,23 +1500,37 @@ class _PgHomeState extends State<PgHome> {
           )),
         ]),
         actions: [
-          if (_selectedChat != null && !_selectedChat!.cleared)
+          if (_selectedChat != null && !_selectedChat!.cleared && _page != 'chat')
             IconButton(
               tooltip: 'Rename conversation',
               onPressed: () => _renameChat(_selectedChat!),
               icon: const Icon(Icons.edit_outlined, color: _orange),
             ),
-          if (online && _page == 'chat')
+          if (online && _page == 'chat') ...[
+            IconButton(
+              tooltip: 'PG voice call (experimental)',
+              onPressed: () => _startCall(false),
+              icon: const Icon(Icons.call_outlined, color: _white),
+            ),
+            IconButton(
+              tooltip: 'PG video call (experimental)',
+              onPressed: () => _startCall(true),
+              icon: const Icon(Icons.videocam_outlined, color: _white),
+            ),
             PopupMenuButton<String>(
               tooltip: 'Conversation actions',
               icon: const Icon(Icons.more_vert_rounded, color: _white),
               color: _surface,
               onSelected: (value) {
+                if (value == 'rename' && _selectedChat != null) {
+                  _renameChat(_selectedChat!);
+                }
                 if (value == 'verify') _showSafetyCode();
                 if (value == 'end') _confirmEnd();
                 if (value == 'about') _showPrivacyNote();
               },
               itemBuilder: (ctx) => const [
+                PopupMenuItem(value: 'rename', child: Text('Rename conversation')),
                 PopupMenuItem(value: 'verify',
                   child: Text('Verify safety code')),
                 PopupMenuItem(value: 'end',
@@ -1524,7 +1538,8 @@ class _PgHomeState extends State<PgHome> {
                 PopupMenuItem(value: 'about',
                   child: Text('About this alpha')),
               ],
-            )
+            ),
+          ]
           else
             IconButton(
               tooltip: 'Privacy and build information',
