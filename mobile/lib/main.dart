@@ -14,6 +14,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'pg_media.dart';
 import 'pg_calls.dart';
+import 'pg_lock.dart';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
@@ -71,7 +72,9 @@ class PgApp extends StatelessWidget {
         contentTextStyle: TextStyle(color: _white),
       ),
     ),
-    home: const PgHome(),
+    home: PgLockShell(
+      builder: (context, enabled, onChange) => PgHome(
+        lockEnabled: enabled, onChangeLock: onChange)),
   );
 }
 
@@ -401,7 +404,14 @@ class _PgServerAddressDialogState extends State<PgServerAddressDialog> {
 }
 
 class PgHome extends StatefulWidget {
-  const PgHome({super.key});
+  const PgHome({
+    super.key,
+    required this.lockEnabled,
+    required this.onChangeLock,
+  });
+  final bool lockEnabled;
+  final Future<bool> Function(bool) onChangeLock;
+
   @override
   State<PgHome> createState() => _PgHomeState();
 }
@@ -1886,6 +1896,20 @@ class _PgHomeState extends State<PgHome> {
     }
   }
 
+  Future<void> _toggleAppLock() async {
+    final enabled = !widget.lockEnabled;
+    final changed = await widget.onChangeLock(enabled);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(changed
+        ? enabled
+          ? 'PG App Lock is on. Your phone will ask to unlock PG next time.'
+          : 'PG App Lock is off.'
+        : 'No change: unlock using your phone security '
+          'or configure fingerprint/PIN in Android settings.'),
+    ));
+  }
+
   void _showPrivacyNote() {
     showModalBottomSheet<void>(
       context: context,
@@ -1894,7 +1918,7 @@ class _PgHomeState extends State<PgHome> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetContext) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 24, 24, 30),
           child: Column(mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1912,6 +1936,15 @@ class _PgHomeState extends State<PgHome> {
                 style: TextStyle(color: _muted, height: 1.6),
               ),
               const SizedBox(height: 16),
+              _secondaryAction(widget.lockEnabled
+                    ? 'PG App Lock: ON · Tap to turn off'
+                    : 'PG App Lock: OFF · Tap to enable', () {
+                Navigator.pop(sheetContext);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) unawaited(_toggleAppLock());
+                });
+              }, icon: Icons.fingerprint_rounded),
+              const SizedBox(height: 10),
               _secondaryAction('Change server address', () {
                 Navigator.pop(sheetContext);
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1930,7 +1963,7 @@ class _PgHomeState extends State<PgHome> {
                 icon: Icons.close_rounded),
             ],
           ),
-        ),
+        )),
       ),
     );
   }

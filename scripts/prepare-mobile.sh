@@ -117,6 +117,7 @@ xml = manifest.read_text()
 permissions = [
     ('android.permission.INTERNET','<uses-permission android:name="android.permission.INTERNET"/>'),
     ('android.permission.POST_NOTIFICATIONS','<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>'),
+    ('android.permission.USE_BIOMETRIC','<uses-permission android:name="android.permission.USE_BIOMETRIC"/>'),
     ('android.permission.CAMERA','<uses-permission android:name="android.permission.CAMERA"/>'),
     ('android.permission.RECORD_AUDIO','<uses-permission android:name="android.permission.RECORD_AUDIO"/>'),
     ('android.permission.MODIFY_AUDIO_SETTINGS','<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>'),
@@ -131,6 +132,28 @@ if 'android.hardware.camera' not in xml:
       '<uses-feature android:name="android.hardware.camera" android:required="false"/>\n    <application', 1)
 manifest.write_text(xml)
 
+# Flutter's default platform theme is not AppCompat on older Android. The
+# biometric dialog requires an AppCompat theme (local_auth_android setup).
+for style_path in (
+    Path('android/app/src/main/res/values/styles.xml'),
+    Path('android/app/src/main/res/values-night/styles.xml'),
+):
+    if style_path.exists():
+        style = style_path.read_text()
+        style = style.replace(
+            'parent="@android:style/Theme.Light.NoTitleBar"',
+            'parent="Theme.AppCompat.DayNight.NoActionBar"')
+        style = style.replace(
+            'parent="@android:style/Theme.Black.NoTitleBar"',
+            'parent="Theme.AppCompat.DayNight.NoActionBar"')
+        style = style.replace(
+            'parent="@android:style/Theme.Light.NoTitleBar.Fullscreen"',
+            'parent="Theme.AppCompat.DayNight.NoActionBar"')
+        style = style.replace(
+            'parent="@android:style/Theme.Black.NoTitleBar.Fullscreen"',
+            'parent="Theme.AppCompat.DayNight.NoActionBar"')
+        style_path.write_text(style)
+
 ios_plist = Path('ios/Runner/Info.plist')
 if ios_plist.exists():
     plist = ios_plist.read_text()
@@ -138,6 +161,7 @@ if ios_plist.exists():
         'NSCameraUsageDescription':'PG uses the camera only when you take a photo or start a video call.',
         'NSMicrophoneUsageDescription':'PG uses the microphone only during an accepted voice or video call.',
         'NSPhotoLibraryUsageDescription':'PG accesses photos that you explicitly choose to share.',
+        'NSFaceIDUsageDescription':'PG uses Face ID only when you enable app lock.',
     }
     for key, value in usage.items():
         if '<key>' + key + '</key>' not in plist:

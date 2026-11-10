@@ -8,18 +8,27 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import io.flutter.embedding.android.FlutterActivity
+import android.os.Bundle
+import android.view.WindowManager
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 // PG testing-alpha notifications: permission prompt and alerts while the
 // Flutter process is alive. No plaintext messages or session identifiers are
 // ever passed to Android's NotificationManager.
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     companion object {
         private const val BRIDGE = "pg/private_notifications"
         private const val CHANNEL = "pg_private_message_alerts"
         private const val PERMISSION_REQUEST = 44107
+    }
+
+    // Keep message contents out of screenshots and Android task previews.
+    // This also prevents screen recording in this alpha.
+    override fun onCreate(savedInstanceState: Bundle?) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        super.onCreate(savedInstanceState)
     }
 
     private var pendingPermissionResult: MethodChannel.Result? = null
