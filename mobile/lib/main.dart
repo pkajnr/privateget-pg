@@ -9,7 +9,7 @@ import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 const _apiBase = String.fromEnvironment('PG_API_URL', defaultValue: 'http://10.0.2.2:8787');
 const _bg = Color(0xFF0B1523);
@@ -63,6 +63,15 @@ class PgApp extends StatelessWidget {
     home: const PgHome(),
   );
 }
+
+// Only the invitation code is shared. No chat keys or messages are included.
+// The invite remains valid until redeemed, revoked, or expired on the PG relay.
+String buildInvitationShareText(String code) =>
+    'You are invited to a private conversation on PrivateGet (PG).\n\n'
+    'Open the PrivateGet app, choose Join a conversation, and paste this invitation code:\n\n'
+    '$code\n\n'
+    'This invitation works only once and expires after 10 minutes. '
+    'Please do not forward it to anyone else.';
 
 class PgMessage {
   final String text;
@@ -371,6 +380,22 @@ class _PgHomeState extends State<PgHome> {
       }
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _shareInvite() async {
+    final code = _inviteCode;
+    if (!mounted || code == null || code.isEmpty) return;
+    try {
+      // The OS offers installed apps such as WhatsApp, Messages and email.
+      // PG doesn't upload the invitation to the share provider itself.
+      await SharePlus.instance.share(ShareParams(
+        text: buildInvitationShareText(code),
+        title: 'PrivateGet invitation',
+        subject: 'PrivateGet private chat invitation',
+      ));
+    } catch (_) {
+      _setError('Unable to open the phone sharing options. Please try again.');
     }
   }
 
@@ -1234,14 +1259,8 @@ class _PgHomeState extends State<PgHome> {
           ),
           const SizedBox(height: 16),
           _primaryAction(_inviteCode == null
-              ? 'Creating invitation…' : 'Copy invitation code', () {
-            final code = _inviteCode;
-            if (code == null) return;
-            Clipboard.setData(ClipboardData(text: code));
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Invite copied. Share it privately and clear your clipboard afterward.'),
-            ));
-          }, disabled: _inviteCode == null, icon: Icons.copy_rounded),
+              ? 'Creating invitation…' : 'Share invitation', _shareInvite,
+            disabled: _inviteCode == null, icon: Icons.share_rounded),
           const SizedBox(height: 15),
           const Text('Expires after 10 minutes • Can only be used once',
             textAlign: TextAlign.center,
