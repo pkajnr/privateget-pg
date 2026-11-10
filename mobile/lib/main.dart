@@ -19,8 +19,9 @@ import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-const _apiBase = String.fromEnvironment('PG_API_URL', defaultValue: 'http://10.0.2.2:8787');
+const _defaultApiBase = String.fromEnvironment('PG_API_URL', defaultValue: 'http://10.0.2.2:8787');
 const _privateAlerts = MethodChannel('pg/private_notifications');
 const _bg = Color(0xFF0B1523);
 const _surface = Color(0xFF17283B);
@@ -102,10 +103,101 @@ String? decodePgSticker(String message) {
   return _pgStickerChoices.contains(glyph) ? glyph : null;
 }
 
+// A reply's quoted text stays inside the existing encrypted message body.
+// Legacy plain-text messages continue to decode unchanged.
+const pgReplyMarker = 'PG_REPLY_V1:';
+const pgStatusMarker = 'PG_STATUS_V1:';
+
+class PgReplyPayload {
+  const PgReplyPayload(this.message, this.quoted, this.quotedFromSender);
+  final String message;
+  final String quoted;
+  final bool quotedFromSender;
+}
+
+String encodePgReply(String message, String quote, bool quoteMine) {
+  if (message.isEmpty || message.length > 1450 ||
+      quote.isEmpty || quote.length > 160) {
+    throw ArgumentError('Reply content exceeds limits');
+  }
+  return pgReplyMarker + jsonEncode({
+    'message': message,
+    'quote': quote,
+    'quoteMine': quoteMine,
+  });
+}
+
+PgReplyPayload? decodePgReply(String raw) {
+  if (!raw.startsWith(pgReplyMarker)) return null;
+  try {
+    final parsed = jsonDecode(raw.substring(pgReplyMarker.length));
+    if (parsed is! Map<String, dynamic>) return null;
+    final message = parsed['message'];
+    final quote = parsed['quote'];
+    final quoteMine = parsed['quoteMine'];
+    if (message is! String || message.isEmpty || message.length > 1450 ||
+        quote is! String || quote.isEmpty || quote.length > 160 ||
+        quoteMine is! bool) return null;
+    return PgReplyPayload(message, quote, quoteMine);
+  } catch (_) {
+    return null;
+  }
+}
+
+class PgStatusIcon {
+  const PgStatusIcon(this.id, this.label, this.icon, this.color);
+  final String id, label;
+  final IconData icon;
+  final Color color;
+}
+
+// PG-exclusive status stickers: structured identifiers are transmitted
+// inside the encrypted chat and rendered by the receiving PG app.
+const pgStatusIcons = <PgStatusIcon>[
+  PgStatusIcon('contract_agreed', 'Contract agreed',
+    Icons.handshake_rounded, Color(0xFF54D7B2)),
+  PgStatusIcon('date_fixed', 'Date fixed',
+    Icons.event_available_rounded, Color(0xFFFFB238)),
+  PgStatusIcon('terms_agreed', 'Terms agreed',
+    Icons.fact_check_rounded, Color(0xFF64D7F9)),
+  PgStatusIcon('on_the_move', 'On the move',
+    Icons.directions_run_rounded, Color(0xFFFF955C)),
+  PgStatusIcon('eating', 'Eating',
+    Icons.restaurant_rounded, Color(0xFF8CE3A3)),
+];
+
+String encodePgStatus(String id) {
+  if (!pgStatusIcons.any((status) => status.id == id)) {
+    throw ArgumentError.value(id, 'id', 'Unsupported PG status');
+  }
+  return '$pgStatusMarker$id';
+}
+
+PgStatusIcon? decodePgStatus(String raw) {
+  if (!raw.startsWith(pgStatusMarker)) return null;
+  final id = raw.substring(pgStatusMarker.length);
+  for (final status in pgStatusIcons) {
+    if (status.id == id) return status;
+  }
+  return null;
+}
+
 class PgMessage {
   final String text;
   final bool mine;
-  PgMessage(this.text, this.mine);
+  final String? quotedText;
+  final bool? quotedMine;
+  PgMessage(this.text, this.mine, {this.quotedText, this.quotedMine});
+
+  factory PgMessage.fromWire(String raw, bool mine) {
+    final reply = decodePgReply(raw);
+    if (reply == null) return PgMessage(raw, mine);
+    return PgMessage(
+      reply.message, mine,
+      quotedText: reply.quoted,
+      quotedMine: mine ? reply.quotedFromSender : !reply.quotedFromSender,
+    );
+  }
 }
 
 
@@ -261,6 +353,53 @@ class _PgRenameDialogState extends State<PgRenameDialog> {
   );
 }
 
+// The dialog owns its controller until the route finishes closing.
+class PgServerAddressDialog extends StatefulWidget {
+  const PgServerAddressDialog({super.key, required this.initialUrl});
+  final String initialUrl;
+  @override
+  State<PgServerAddressDialog> createState() => _PgServerAddressDialogState();
+}
+class _PgServerAddressDialogState extends State<PgServerAddressDialog> {
+  late final TextEditingController _controller;
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialUrl);
+  }
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('PG server address'),
+    content: Column(mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Open the Render dashboard and copy the exact HTTPS '
+        'address of the PG web service.'),
+      const SizedBox(height: 12),
+      TextField(
+        controller: _controller,
+        keyboardType: TextInputType.url,
+        autocorrect: false,
+        decoration: const InputDecoration(
+          labelText: 'Server address',
+          hintText: 'https://your-service.onrender.com',
+        ),
+        onSubmitted: (value) => Navigator.pop(context, value),
+      ),
+    ]),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel')),
+      FilledButton(onPressed: () => Navigator.pop(context, _controller.text),
+        child: const Text('Use address')),
+    ],
+  );
+}
+
 class PgHome extends StatefulWidget {
   const PgHome({super.key});
   @override
@@ -299,16 +438,18 @@ class _PgHomeState extends State<PgHome> {
   bool _busy = false;
   bool _polling = false;
   String? _token, _deviceId;
+  String _apiBase = _defaultApiBase;
   String? _error;
   bool _ending = false;
   String _pickerMode = 'none'; // none or sticker
+  PgMessage? _replyTarget;
 
   @override
   void initState() {
     super.initState();
     _http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     _calls = PgCallService(_sendCallSignal);
-    _register();
+    unawaited(_loadServerUrlAndRegister());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_requestNotificationPermission());
     });
@@ -364,7 +505,14 @@ class _PgHomeState extends State<PgHome> {
 
   Future<Map<String, dynamic>> _request(String method, String path, [Map<String, dynamic>? body]) async {
     final uri = Uri.parse('$_apiBase$path');
-    final request = await _http!.openUrl(method, uri).timeout(const Duration(seconds: 7));
+    final HttpClientRequest request;
+    try {
+      request = await _http!.openUrl(method, uri)
+          .timeout(const Duration(seconds: 7));
+    } on SocketException {
+      throw ApiException('Cannot resolve or reach the PG host ' + uri.host +
+        '. Open Server address and use the HTTPS URL from your Render dashboard.');
+    }
     request.headers.set('Accept', 'application/json');
     request.headers.set('Cache-Control', 'no-store');
     if (_token != null) request.headers.set('Authorization', 'Bearer $_token');
@@ -377,6 +525,30 @@ class _PgHomeState extends State<PgHome> {
     final result = jsonDecode(raw) as Map<String, dynamic>;
     if (response.statusCode >= 400) throw ApiException('${response.statusCode}: ${result['error'] ?? 'Request failed'}');
     return result;
+  }
+
+  Future<void> _loadServerUrlAndRegister() async {
+    try {
+      final saved = await SharedPreferencesAsync().getString('pg_server_url_v1');
+      if (saved != null && _validPgServerUrl(saved) && mounted) {
+        setState(() => _apiBase = saved);
+      }
+    } catch (_) {
+      // Keep the build-time address when preferences cannot be loaded.
+    }
+    if (mounted) await _register();
+  }
+
+  static bool _validPgServerUrl(String url) {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || !uri.hasAuthority || uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment ||
+        (uri.path.isNotEmpty && uri.path != '/')) return false;
+    if (uri.scheme == 'https') return true;
+    if (uri.scheme != 'http') return false;
+    return uri.host == 'localhost' || uri.host == '127.0.0.1' ||
+        uri.host == '10.0.2.2' ||
+        uri.host.startsWith('192.168.') || uri.host.startsWith('10.');
   }
 
   Future<void> _register() async {
@@ -407,6 +579,7 @@ class _PgHomeState extends State<PgHome> {
     }
     setState(() {
       _pickerMode = 'none';
+      _replyTarget = null;
       if (chat != null && add) _chats.add(chat);
       _selectedChat = chat;
       if (chat != null) chat.markRead();
@@ -628,6 +801,18 @@ class _PgHomeState extends State<PgHome> {
         chat?.page != 'chat') return;
     final text = overrideText ?? _messageInput.text.trim();
     if (text.isEmpty || text.length > 2000) return;
+    final reply = overrideText == null ? _replyTarget : null;
+    if (reply != null && text.length > 1450) {
+      _setError('Replies must be shorter than 1,450 characters.');
+      return;
+    }
+    final quoted = reply == null ? null : _replyPreview(reply);
+    final wire = reply == null
+        ? text : encodePgReply(text, quoted!, reply.mine);
+    if (wire.length > 2000) {
+      _setError('Reply is too long. Shorten the message.');
+      return;
+    }
     final id = chat!.sessionId!;
     final key = chat.sendKey!;
     final role = chat.role!;
@@ -635,7 +820,7 @@ class _PgHomeState extends State<PgHome> {
     try {
       final rand = Random.secure();
       final nonce = List<int>.generate(12, (_) => rand.nextInt(256));
-      final box = await _cipher.encrypt(utf8.encode(text),
+      final box = await _cipher.encrypt(utf8.encode(wire),
           secretKey: key, nonce: nonce,
           aad: utf8.encode('PG|$id|$role'));
       await _request('POST', '/v1/sessions/$id/messages', {
@@ -645,8 +830,10 @@ class _PgHomeState extends State<PgHome> {
       });
       if (!mounted || chat.cleared || !_chats.contains(chat)) return;
       setState(() {
-        chat.messages.add(PgMessage(text, true));
+        chat.messages.add(PgMessage(
+          text, true, quotedText: quoted, quotedMine: reply?.mine));
         if (identical(_selectedChat, chat)) {
+          if (reply != null) _replyTarget = null;
           if (overrideText == null) {
             _messageInput.clear();
             chat.draft = '';
@@ -680,7 +867,7 @@ class _PgHomeState extends State<PgHome> {
             mac: Mac(_bytes(m['mac'] as String)));
         final clear = await _cipher.decrypt(box,
             secretKey: key, aad: utf8.encode('PG|$id|$opposite'));
-        newItems.add(PgMessage(utf8.decode(clear), false));
+        newItems.add(PgMessage.fromWire(utf8.decode(clear), false));
       } catch (_) {
         newItems.add(PgMessage('Message authentication failed', false));
       }
@@ -718,6 +905,7 @@ class _PgHomeState extends State<PgHome> {
     if (_calls.sessionId == chat.sessionId && _calls.callId != null) {
       unawaited(_calls.close(sendEnd: false));
     }
+    if (identical(_selectedChat, chat)) _replyTarget = null;
     chat.clearSensitive();
     chat.page = 'ended';
     if (mounted) {
@@ -1109,6 +1297,94 @@ class _PgHomeState extends State<PgHome> {
     );
   }
 
+  String _replyPreview(PgMessage message) {
+    final attachment = PgAttachment.fromMessage(message.text);
+    if (attachment != null) return 'Attachment: ${attachment.name}';
+    final status = decodePgStatus(message.text);
+    if (status != null) return status.label;
+    final sticker = decodePgSticker(message.text);
+    if (sticker != null) return 'Sticker $sticker';
+    final normal = message.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return normal.length > 150 ? '${normal.substring(0, 149)}…' : normal;
+  }
+
+  void _replyTo(PgMessage message) {
+    final chat = _selectedChat;
+    if (chat == null || chat.cleared || chat.page != 'chat' ||
+        !chat.messages.contains(message)) return;
+    setState(() {
+      _pickerMode = 'none';
+      _replyTarget = message;
+    });
+    _messageFocus.requestFocus();
+  }
+
+  Widget _replyPreviewBar() {
+    final target = _replyTarget;
+    if (target == null) return const SizedBox.shrink();
+    return Container(
+      key: const ValueKey('pg-reply-preview'),
+      margin: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: _surface,
+        border: Border(left: BorderSide(color: _teal, width: 3)),
+      ),
+      child: Row(children: [
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(target.mine ? 'Replying to yourself' : 'Replying to contact',
+              style: const TextStyle(fontSize: 11, color: _teal,
+                fontWeight: FontWeight.w800)),
+            const SizedBox(height: 3),
+            Text(_replyPreview(target),
+              maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: _white, fontSize: 12)),
+          ],
+        )),
+        IconButton(
+          tooltip: 'Cancel reply',
+          onPressed: () => setState(() => _replyTarget = null),
+          icon: const Icon(Icons.close_rounded, color: _muted),
+        ),
+      ]),
+    );
+  }
+
+  Widget _pgStatusArtwork(PgStatusIcon status, {double size = 58}) {
+    return Container(
+      width: size, height: size,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D2530),
+        borderRadius: BorderRadius.circular(size * .28),
+        border: Border.all(color: status.color.withValues(alpha: 0.5), width: 2),
+        boxShadow: [BoxShadow(
+          color: status.color.withValues(alpha: 0.17),
+          blurRadius: 12, spreadRadius: 1)],
+      ),
+      child: Stack(alignment: Alignment.center, children: [
+        Icon(status.icon, size: size * .52, color: status.color),
+        Positioned(right: size * .1, bottom: size * .08,
+          child: Container(
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle, color: Color(0xFF133D37)),
+            child: Icon(Icons.check_rounded,
+              size: size * .20, color: const Color(0xFFFFB238)),
+          )),
+      ]),
+    );
+  }
+
+  Widget _pgStatusMessage(PgStatusIcon status) =>
+    Column(mainAxisSize: MainAxisSize.min, children: [
+      _pgStatusArtwork(status, size: 76),
+      const SizedBox(height: 6),
+      Text(status.label,
+        style: const TextStyle(color: _white, fontSize: 12,
+          fontWeight: FontWeight.w800)),
+    ]);
+
   void _togglePicker(String mode) {
     FocusManager.instance.primaryFocus?.unfocus();
     if (!mounted || _page != 'chat') return;
@@ -1117,33 +1393,60 @@ class _PgHomeState extends State<PgHome> {
 
   Widget _buildChatPicker() => Container(
     margin: const EdgeInsets.only(bottom: 8),
-    padding: const EdgeInsets.all(10),
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
     decoration: BoxDecoration(
       color: _surface,
       border: Border.all(color: _stroke),
       borderRadius: BorderRadius.circular(18),
     ),
-    child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Align(
-        alignment: Alignment.centerLeft,
-        child: Text('STICKERS', style: TextStyle(
+    child: SizedBox(height: 236, child: SingleChildScrollView(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('PG EXCLUSIVE', style: TextStyle(
+          color: _teal, fontSize: 11, letterSpacing: 1.2,
+          fontWeight: FontWeight.w900)),
+        const SizedBox(height: 8),
+        SizedBox(height: 110, child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: pgStatusIcons.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 10),
+          itemBuilder: (context, index) {
+            final status = pgStatusIcons[index];
+            return InkWell(
+              key: ValueKey('pg-status-${status.id}'),
+              borderRadius: BorderRadius.circular(12),
+              onTap: _busy ? null : () =>
+                  _sendMessage(overrideText: encodePgStatus(status.id)),
+              child: SizedBox(width: 86, child: Column(children: [
+                _pgStatusArtwork(status, size: 68),
+                const SizedBox(height: 6),
+                Text(status.label, maxLines: 2,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: _white, fontSize: 10,
+                    fontWeight: FontWeight.w700)),
+              ])),
+            );
+          },
+        )),
+        const SizedBox(height: 10),
+        const Text('CLASSIC STICKERS', style: TextStyle(
           color: _muted, fontSize: 11, letterSpacing: 1.2,
           fontWeight: FontWeight.w800)),
-      ),
-      const SizedBox(height: 8),
-      SizedBox(height: 116, child: SingleChildScrollView(
-        child: Wrap(spacing: 6, runSpacing: 6, children: [
-          for (final glyph in _pgStickerChoices)
-            SizedBox(width: 62, height: 58, child: IconButton(
-              tooltip: 'Send sticker $glyph',
-              padding: EdgeInsets.zero,
-              onPressed: _busy ? null : () =>
-                  _sendMessage(overrideText: encodePgSticker(glyph)),
-              icon: Text(glyph, style: const TextStyle(fontSize: 38)),
-            )),
-        ]),
-      )),
-    ]),
+        const SizedBox(height: 4),
+        SizedBox(height: 54, child: ListView(
+          scrollDirection: Axis.horizontal,
+          children: [
+            for (final glyph in _pgStickerChoices)
+              SizedBox(width: 55, height: 52, child: IconButton(
+                tooltip: 'Send sticker $glyph',
+                padding: EdgeInsets.zero,
+                onPressed: _busy ? null : () =>
+                    _sendMessage(overrideText: encodePgSticker(glyph)),
+                icon: Text(glyph, style: const TextStyle(fontSize: 34)),
+              )),
+          ],
+        )),
+      ]),
+    )),
   );
 
   void _scrollDown() {
@@ -1440,6 +1743,82 @@ class _PgHomeState extends State<PgHome> {
     if (confirmed == true && mounted) await _endChat();
   }
 
+  Future<void> _editServerAddress() async {
+    if (!mounted) return;
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (_) => PgServerAddressDialog(initialUrl: _apiBase),
+    );
+    if (!mounted || chosen == null) return;
+    final trimmed = chosen.trim();
+    final address = trimmed.endsWith('/')
+        ? trimmed.substring(0, trimmed.length - 1) : trimmed;
+    if (!_validPgServerUrl(address)) {
+      _setError('Enter the exact HTTPS address from your Render dashboard.');
+      return;
+    }
+    if (address == _apiBase) {
+      if (_token == null) await _register();
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Switch PG servers?'),
+        content: const Text(
+          'This removes active chats and session keys from this phone. '
+          'PG cannot confirm deletion on the previous server if it is '
+          'unreachable. You will need new invitations.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Switch server')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _calls.close(sendEnd: false);
+    _http?.close(force: true);
+    _http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    setState(() {
+      for (final chat in _chats) chat.clearSensitive();
+      _chats.clear();
+      _selectedChat = null;
+      _messageInput.clear();
+      _inviteInput.clear();
+      _replyTarget = null;
+      _pickerMode = 'none';
+      _apiBase = address;
+      _token = null;
+      _deviceId = null;
+      _error = null;
+    });
+    try {
+      await SharedPreferencesAsync().setString('pg_server_url_v1', address);
+    } catch (_) {
+      _setError('PG could not save the server URL for the next app launch.');
+    }
+    if (mounted) await _register();
+  }
+
+  Future<void> _testNotification() async {
+    if (!mounted || !Platform.isAndroid) return;
+    await _requestNotificationPermission();
+    try {
+      final delivered =
+          await _privateAlerts.invokeMethod<bool>('showPrivateMessage');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(delivered == true
+          ? 'PG sent a test alert. Check the notification shade.'
+          : 'Notifications are blocked in Android settings.'),
+      ));
+    } catch (_) {
+      _setError('Could not generate the test notification.');
+    }
+  }
+
   void _showPrivacyNote() {
     showModalBottomSheet<void>(
       context: context,
@@ -1465,7 +1844,21 @@ class _PgHomeState extends State<PgHome> {
                 'Avoid sharing invitation codes publicly.',
                 style: TextStyle(color: _muted, height: 1.6),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 16),
+              _secondaryAction('Change server address', () {
+                Navigator.pop(sheetContext);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) unawaited(_editServerAddress());
+                });
+              }, icon: Icons.settings_ethernet_rounded),
+              const SizedBox(height: 10),
+              _secondaryAction('Test Android notification', () {
+                Navigator.pop(sheetContext);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) unawaited(_testNotification());
+                });
+              }, icon: Icons.notifications_active_outlined),
+              const SizedBox(height: 12),
               _secondaryAction('Close', () => Navigator.pop(sheetContext),
                 icon: Icons.close_rounded),
             ],
@@ -1673,7 +2066,11 @@ class _PgHomeState extends State<PgHome> {
           textAlign: TextAlign.center,
           style: TextStyle(color: _muted, fontSize: 14, height: 1.5)),
         const SizedBox(height: 22),
-        _primaryAction('Try connecting again', _register, icon: Icons.refresh_rounded),
+        _primaryAction('Try connecting again', _register,
+          icon: Icons.refresh_rounded),
+        const SizedBox(height: 12),
+        _secondaryAction('Change server address', _editServerAddress,
+          icon: Icons.settings_ethernet_rounded),
         const SizedBox(height: 12),
         Text(_apiBase, textAlign: TextAlign.center,
           style: const TextStyle(color: _muted, fontSize: 11)),
@@ -1855,7 +2252,11 @@ class _PgHomeState extends State<PgHome> {
               final message = _messages[index];
               return Align(
                 alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
-                child: Container(
+                child: InkWell(
+                  key: ValueKey('pg-message-$index'),
+                  onLongPress: () => _replyTo(message),
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
                   constraints: BoxConstraints(
                     maxWidth: MediaQuery.of(context).size.width * 0.77),
                   margin: const EdgeInsets.symmetric(vertical: 5),
@@ -1872,15 +2273,49 @@ class _PgHomeState extends State<PgHome> {
                     ),
                   ),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(message.mine ? 'YOU' : 'CONTACT',
-                      style: TextStyle(color: message.mine ? _orange : _teal,
-                        letterSpacing: 0.9, fontWeight: FontWeight.w800, fontSize: 9)),
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text(message.mine ? 'YOU' : 'CONTACT',
+                        style: TextStyle(color: message.mine ? _orange : _teal,
+                          letterSpacing: 0.9, fontWeight: FontWeight.w800,
+                          fontSize: 9)),
+                      const SizedBox(width: 16),
+                      InkWell(
+                        onTap: () => _replyTo(message),
+                        child: const Padding(
+                          padding: EdgeInsets.all(5),
+                          child: Icon(Icons.reply_rounded, color: _muted, size: 17),
+                        ),
+                      ),
+                    ]),
+                    if (message.quotedText != null) ...[
+                      const SizedBox(height: 7),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _bg.withValues(alpha: 0.55),
+                          border: const Border(
+                            left: BorderSide(color: _teal, width: 3)),
+                        ),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(message.quotedMine == true ? 'You' : 'Contact',
+                              style: const TextStyle(color: _teal, fontSize: 10,
+                                fontWeight: FontWeight.w800)),
+                            Text(message.quotedText!,
+                              maxLines: 3, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: _muted, fontSize: 12)),
+                          ]),
+                      ),
+                    ],
                     const SizedBox(height: 5),
                     if (PgAttachment.fromMessage(message.text) != null)
                       _buildAttachmentBubble(
                         PgAttachment.fromMessage(message.text)!, message.mine)
                     else if (message.text.startsWith(pgFilePrefix))
-                      const Text('Unsupported attachment', style: TextStyle(color: _muted))
+                      const Text('Unsupported attachment',
+                        style: TextStyle(color: _muted))
+                    else if (decodePgStatus(message.text) != null)
+                      _pgStatusMessage(decodePgStatus(message.text)!)
                     else
                       Text(
                         decodePgSticker(message.text) ?? message.text,
@@ -1892,10 +2327,12 @@ class _PgHomeState extends State<PgHome> {
                       ),
                   ]),
                 ),
+                ),
               );
             },
           )),
       if (_pickerMode == 'sticker') _buildChatPicker(),
+      if (_replyTarget != null) _replyPreviewBar(),
       Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
         IconButton(
           tooltip: 'Attach photo, video or document',
