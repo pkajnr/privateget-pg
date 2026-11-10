@@ -19,6 +19,8 @@ class PgCallService extends ChangeNotifier {
   MediaStream? _localMedia;
   String? sessionId, callId;
   bool video = false, muted = false, connecting = false, active = false;
+  bool remoteVideoReady = false;
+  MediaStream? _fallbackRemoteStream;
   bool _remoteDescriptionReady = false;
   bool _renderersReady = false;
   final List<RTCIceCandidate> _earlyIce = [];
@@ -41,6 +43,7 @@ class PgCallService extends ChangeNotifier {
     callId = cid;
     video = withVideo;
     muted = false;
+    remoteVideoReady = false;
     connecting = true;
     notifyListeners();
     await _ensureRenderers();
@@ -61,16 +64,19 @@ class PgCallService extends ChangeNotifier {
       }).catchError((Object _) {}));
     };
     _peer!.onTrack = (event) {
-      if (event.streams.isNotEmpty) {
-        remoteVideo.srcObject = event.streams.first;
-        active = true;
-        connecting = false;
-        notifyListeners();
-      }
+      // Some WebRTC platforms deliver a video track without an associated
+      // MediaStream. Handle both shapes so incoming video isn't left blank.
+      unawaited(_attachRemoteTrack(event));
     };
     _peer!.onConnectionState = (state) {
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         active = true;
+        connecting = false;
+        notifyListeners();
+      } else if (state ==
+            RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+        active = false;
         connecting = false;
         notifyListeners();
       }
@@ -82,6 +88,36 @@ class PgCallService extends ChangeNotifier {
     localVideo.srcObject = _localMedia;
     for (final track in _localMedia!.getTracks()) {
       await _peer!.addTrack(track, _localMedia!);
+    }
+  }
+
+  Future<void> _attachRemoteTrack(RTCTrackEvent event) async {
+    if (callId == null) return;
+    // An audio track can arrive before video. Don't mistakenly mark the
+    // video renderer ready when there is no video.
+    if (event.track.kind != 'video') return;
+    try {
+      final MediaStream incoming;
+      if (event.streams.isNotEmpty) {
+        incoming = event.streams.first;
+      } else {
+        final newStream = await createLocalMediaStream('pg-remote-video');
+        if (callId == null) {
+          await newStream.dispose();
+          return;
+        }
+        await newStream.addTrack(event.track);
+        _fallbackRemoteStream = newStream;
+        incoming = newStream;
+      }
+      if (callId == null) return;
+      remoteVideo.srcObject = incoming;
+      remoteVideoReady = true;
+      notifyListeners();
+    } catch (_) {
+      // Connection and video state will remain "waiting"; the user can hang up.
+      remoteVideoReady = false;
+      notifyListeners();
     }
   }
 
@@ -187,7 +223,7 @@ class PgCallService extends ChangeNotifier {
     callId = null; sessionId = null;
     _remoteDescriptionReady = false;
     _earlyIce.clear();
-    active = false; connecting = false;
+    active = false; connecting = false; remoteVideoReady = false;
     notifyListeners();
     if (sendEnd && sid != null && cid != null) {
       try { await send(sid, cid, 'end', {}); } catch (_) {}
@@ -199,6 +235,8 @@ class PgCallService extends ChangeNotifier {
     _localMedia = null;
     localVideo.srcObject = null;
     remoteVideo.srcObject = null;
+    await _fallbackRemoteStream?.dispose();
+    _fallbackRemoteStream = null;
     await _peer?.close();
     await _peer?.dispose();
     _peer = null;
