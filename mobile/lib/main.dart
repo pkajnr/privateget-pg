@@ -802,6 +802,10 @@ class _PgHomeState extends State<PgHome> {
     final text = overrideText ?? _messageInput.text.trim();
     if (text.isEmpty || text.length > 2000) return;
     final reply = overrideText == null ? _replyTarget : null;
+    if (reply != null && text.length > 1450) {
+      _setError('Replies must be shorter than 1,450 characters.');
+      return;
+    }
     final quoted = reply == null ? null : _replyPreview(reply);
     final wire = reply == null
         ? text : encodePgReply(text, quoted!, reply.mine);
@@ -1325,7 +1329,6 @@ class _PgHomeState extends State<PgHome> {
       decoration: BoxDecoration(
         color: _surface,
         border: Border(left: BorderSide(color: _teal, width: 3)),
-        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(children: [
         Expanded(child: Column(
@@ -2292,7 +2295,6 @@ class _PgHomeState extends State<PgHome> {
                           color: _bg.withValues(alpha: 0.55),
                           border: const Border(
                             left: BorderSide(color: _teal, width: 3)),
-                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
