@@ -203,7 +203,7 @@ class _PgLockShellState extends State<PgLockShell>
                 child: Padding(
                   padding: const EdgeInsets.all(28),
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.shield_lock_rounded,
+                    const Icon(Icons.security_rounded,
                       size: 82, color: Color(0xFFFFB340)),
                     const SizedBox(height: 16),
                     const Text('PG is locked',
