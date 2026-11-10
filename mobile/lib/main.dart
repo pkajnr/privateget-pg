@@ -448,7 +448,7 @@ class _PgHomeState extends State<PgHome> {
   void initState() {
     super.initState();
     _http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
-    _calls = PgCallService(_sendCallSignal);
+    _calls = PgCallService(_sendCallSignal, _loadIceServers);
     unawaited(_loadServerUrlAndRegister());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_requestNotificationPermission());
@@ -958,6 +958,32 @@ class _PgHomeState extends State<PgHome> {
         _messageInput.clear();
       }
     });
+  }
+
+  Future<List<Map<String, dynamic>>> _loadIceServers(String sid) async {
+    const fallback = <Map<String, dynamic>>[
+      {'urls': 'stun:stun.l.google.com:19302'},
+    ];
+    try {
+      final result = await _request('GET', '/v1/sessions/$sid/ice');
+      final source = result['iceServers'];
+      if (source is! List) return fallback;
+      final out = <Map<String, dynamic>>[];
+      for (final value in source) {
+        if (value is! Map) continue;
+        final data = Map<String, dynamic>.from(value);
+        final urls = data['urls'];
+        if (urls is! String && urls is! List) continue;
+        if (urls is List &&
+            (urls.isEmpty || !urls.every((v) => v is String))) continue;
+        out.add(data);
+      }
+      return out.isEmpty ? fallback : out;
+    } catch (_) {
+      // Older PG relay versions have no ICE route; keep existing STUN-only
+      // behavior for alpha backward compatibility, not a TURN guarantee.
+      return fallback;
+    }
   }
 
   Future<void> _sendCallSignal(
