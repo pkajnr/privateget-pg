@@ -1868,43 +1868,37 @@ class _PgHomeState extends State<PgHome> {
           icon: const Icon(Icons.add_circle_outline_rounded, color: _teal),
           onPressed: _busy ? null : _showAttachmentOptions,
         ),
-        Expanded(child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(25),
-            color: _field,
-            border: Border.all(color: _stroke),
-          ),
-          child: Row(children: [
-            Expanded(child: TextField(
-              controller: _messageInput,
-              focusNode: _messageFocus,
-              minLines: 1, maxLines: 3, maxLength: 2000,
-              keyboardType: TextInputType.multiline,
-              textInputAction: TextInputAction.newline,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                hintText: 'Message', counterText: '',
-                border: InputBorder.none, enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 11),
-              ),
-            )),
-            IconButton(
-              tooltip: 'Use the phone emoji keyboard',
-              icon: const Icon(Icons.emoji_emotions_outlined, color: _muted),
-              onPressed: () {
-                if (_pickerMode != 'none') {
-                  setState(() => _pickerMode = 'none');
-                }
-                _messageFocus.requestFocus();
-              },
+        Expanded(child: TextField(
+          controller: _messageInput,
+          focusNode: _messageFocus,
+          minLines: 1, maxLines: 3, maxLength: 2000,
+          keyboardType: TextInputType.multiline,
+          textInputAction: TextInputAction.newline,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: InputDecoration(
+            hintText: 'Message', counterText: '',
+            filled: true,
+            fillColor: _field,
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16, vertical: 13),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(26),
+              borderSide: const BorderSide(color: _stroke),
             ),
-          ]),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(26),
+              borderSide: const BorderSide(color: _stroke),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(26),
+              borderSide: const BorderSide(color: _orange, width: 1.5),
+            ),
+          ),
         )),
         IconButton(
-          tooltip: 'Open sticker tray',
-          icon: const Icon(Icons.sticky_note_2_outlined, color: _teal),
+          tooltip: 'Open emoji and sticker tray',
+          icon: const Icon(Icons.emoji_emotions_outlined, color: _teal),
           onPressed: () => _togglePicker('sticker'),
         ),
         IconButton(
