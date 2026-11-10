@@ -300,7 +300,7 @@ class _PgHomeState extends State<PgHome> {
   String? _token, _deviceId;
   String? _error;
   bool _ending = false;
-  String _pickerMode = 'none'; // none, emoji, sticker
+  String _pickerMode = 'none'; // none or sticker
 
   @override
   void initState() {
@@ -796,6 +796,24 @@ class _PgHomeState extends State<PgHome> {
     if (chat == null || chat.page != 'chat' || chat.sessionId == null ||
         _calls.callId != null || _busy) return;
     try {
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(video ? 'Start video call?' : 'Start voice call?'),
+          content: const Text(
+            'Experimental PG calls are not security-audited. '
+            'WebRTC and the STUN service may learn network metadata '
+            'including IP addresses. This is for testing, not confidential calls.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Call')),
+          ],
+        ),
+      );
+      if (approved != true || !mounted || chat.cleared ||
+          !_chats.contains(chat) || chat.page != 'chat') return;
       await _calls.dial(chat.sessionId!, withVideo: video);
       if (mounted && _calls.callId != null) unawaited(_openCallPanel());
     } catch (error) {
@@ -989,7 +1007,12 @@ class _PgHomeState extends State<PgHome> {
           builder: (ctx) => Dialog(
             backgroundColor: _bg,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Flexible(child: Image.memory(bytes, fit: BoxFit.contain)),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(ctx).height * 0.68,
+                  maxWidth: MediaQuery.sizeOf(ctx).width * 0.92),
+                child: Image.memory(bytes, fit: BoxFit.contain),
+              ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Close image'),
